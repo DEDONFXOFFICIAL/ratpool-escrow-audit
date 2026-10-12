@@ -48,7 +48,15 @@ export const POST = endpoint(async (body, req) => {
   // in another player's name.
   await requireWalletProof(body, from, "send", sendDetail(body.to, body.amount));
 
-  if (!await withinLimit(`xfer:w:${from.toBase58()}`, 30, 3600)) {
+  // Per wallet, per network and overall: a wallet costs nothing to make, so
+  // tiny amounts passed round a ring of fresh wallets spent the platform's fee
+  // money thirty transfers per wallet per hour, without end (review,
+  // 2026-10-12). Sends are rare for a player; these leave room for many.
+  if (
+    !await withinLimit(`xfer:w:${from.toBase58()}`, 30, 3600) ||
+    !await withinLimit(`xfer:ip:${ipKey(req!)}`, 120, 3600) ||
+    !await withinLimit("xfer:all", 3000, 3600)
+  ) {
     throw new HttpError(429, "Too many transfers — try again later.");
   }
 

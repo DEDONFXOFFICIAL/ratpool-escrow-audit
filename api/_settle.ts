@@ -11,6 +11,7 @@ import {
   ACCOUNT_SIZE,
   createAssociatedTokenAccountIdempotentInstruction,
   createInitializeAccount3Instruction,
+  getAssociatedTokenAddressSync,
   getMinimumBalanceForRentExemptAccount,
   unpackAccount,
 } from "@solana/spl-token";
@@ -113,7 +114,11 @@ export async function paySigned(p: EscrowProgram, id: bigint, m: MatchAccount, s
   const spares: { ixs: TransactionInstruction[]; key: Keypair }[] = [];
   const rent = await getMinimumBalanceForRentExemptAccount(conn);
   const destination = async (owner: PublicKey): Promise<PublicKey> => {
-    const usual = ata(owner);
+    // Off-curve owners allowed: a referrer can be any address the program
+    // accepted, a program address included, and refusing to derive its
+    // account failed every attempt to pay the whole match (review,
+    // 2026-10-12). For a wallet it is the same account as ata().
+    const usual = getAssociatedTokenAddressSync(mint(), owner, true, TOKEN_PROGRAM_ID);
     const info = await conn.getAccountInfo(usual, "confirmed");
     if (!info) {
       creates.push(createAssociatedTokenAccountIdempotentInstruction(auth.publicKey, usual, owner, mint(), TOKEN_PROGRAM_ID));

@@ -64,7 +64,9 @@ export const POST = endpoint(async (body) => {
           .filter((pl) => ["collected", "paid"].includes(enumKey<string>(pl.status)))
           .map((pl) => pl.key.toBase58())
       : [...new Set([...done.winners, ...wallets])];
-    return { ...(await record(id, stakers, wallets, done, m ? BigInt(m.entry.toString()) : undefined)), recovered: true };
+    const out = await record(id, stakers, wallets, done, m ? BigInt(m.entry.toString()) : undefined);
+    if (m && out.recorded) await sendClose(p, id, m.feeWallet);
+    return { ...out, recovered: true };
   }
   if (state !== "collected") {
     throw new HttpError(410, state === "cancelled" ? "match was cancelled; its stakes are refundable" : "match was never collected");
@@ -110,15 +112,35 @@ export const POST = endpoint(async (body) => {
     throw new HttpError(503, "the escrow has no room key");
   }
   const paid = await paySigned(p, id, m!, body.signed);
-  // Rent back. Not awaited by the client's result; a failure here costs the
-  // authority a little SOL and nothing else.
-  void p.methods
-    .closeMatch(toBn(id))
-    .accountsPartial({ authority: auth, mint: mint(), feeAta: ata(m!.feeWallet), tokenProgram: TOKEN_PROGRAM_ID })
-    .rpc()
-    .catch(() => {});
-  return record(id, stakers, ranking.map((w) => w.toBase58()), paid, BigInt(m!.entry.toString()));
+  const out = await record(id, stakers, ranking.map((w) => w.toBase58()), paid, BigInt(m!.entry.toString()));
+  if (out.recorded) await sendClose(p, id, m!.feeWallet);
+  return out;
 }, { signed: true });
+
+/**
+ * Rent back, sent and not waited for: the room is waiting on this answer, and
+ * a close that never lands costs the authority a little SOL. Only once the
+ * record is in: a closed match no longer says what its entry was, so a
+ * record retried after the close could not rebuild a match row lost when the
+ * match opened (full audit, 2026-10-09). Until then the match stays settled
+ * on chain, and the room's next call writes the record and closes it.
+ */
+async function sendClose(p: EscrowProgram, id: bigint, feeWallet: PublicKey): Promise<void> {
+  try {
+    const auth = authority();
+    const conn = p.provider.connection;
+    const tx = await p.methods
+      .closeMatch(toBn(id))
+      .accountsPartial({ authority: auth.publicKey, mint: mint(), feeAta: ata(feeWallet), tokenProgram: TOKEN_PROGRAM_ID })
+      .transaction();
+    tx.feePayer = auth.publicKey;
+    tx.recentBlockhash = (await conn.getLatestBlockhash("confirmed")).blockhash;
+    tx.sign(auth);
+    await conn.sendRawTransaction(tx.serialize());
+  } catch {
+    /* rent only */
+  }
+}
 
 /**
  * The settlement of match `id`, from its MatchSettled event on chain, or
@@ -129,8 +151,23 @@ export const POST = endpoint(async (body) => {
 async function findSettlement(p: EscrowProgram, id: bigint): Promise<(Payout & { unpaired: boolean }) | null> {
   const conn = p.provider.connection;
   const parser = new EventParser(p.programId, p.coder);
-  const sigs = await conn.getSignaturesForAddress(matchPda(id), { limit: 50 });
-  for (const s of sigs) {
+  // The match's whole history, not only its last fifty entries: anyone can
+  // name the match's account in transactions of their own, and fifty of them
+  // hid the payout from this search for good (review, 2026-10-12). The last
+  // fifty first, where a payout normally is (it and the close are the
+  // newest); then the rest from the start, where the payout comes within the
+  // match's own short history however much was added after it. Bounded.
+  const sigs: Awaited<ReturnType<typeof conn.getSignaturesForAddress>> = [];
+  for (let before: string | undefined, page = 0; page < 20; page++) {
+    const batch = await conn.getSignaturesForAddress(matchPda(id), { limit: 1000, before });
+    sigs.push(...batch);
+    if (batch.length < 1000) break;
+    before = batch[batch.length - 1].signature;
+  }
+  const order = [...sigs.slice(0, 50), ...sigs.slice(50).reverse()];
+  let looked = 0;
+  for (const s of order) {
+    if (++looked > 400) break;
     if (s.err) continue;
     const tx = await conn.getTransaction(s.signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
     for (const ev of parser.parseLogs(tx?.meta?.logMessages ?? [])) {

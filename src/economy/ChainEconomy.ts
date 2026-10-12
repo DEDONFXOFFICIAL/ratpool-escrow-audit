@@ -761,7 +761,10 @@ export class ChainEconomy implements EconomyService {
 
   /** The approval back, before the room collected. */
   async unstake(matchId?: string): Promise<void> {
-    const id = this.pending?.id ?? (matchId !== undefined ? BigInt(matchId) : undefined);
+    // The match named first: a leave revoked in the background (LobbySelect)
+    // can run after the player has staked in another pool, and taking the
+    // stake in progress first revoked that one (review, 2026-10-12).
+    const id = matchId !== undefined ? BigInt(matchId) : this.pending?.id;
     if (id === undefined) return;
     // Nothing approved on chain is nothing to revoke. Unreadable: try anyway.
     if ((await this.statusIn(id).catch(() => "joined" as const)) !== "joined") {
