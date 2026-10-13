@@ -1,7 +1,7 @@
 import { SystemProgram } from "@solana/web3.js";
 import { toBn, TOKEN_PROGRAM_ID } from "../../src/chain/escrow.js";
-import { requireFeeFunds, preflight, ata, connection, authority, endpoint, entryUnits, HttpError, mint, newMatchId, parsePubkey, program, tierById } from "../_lib.js";
-import { DB_ENABLED, dbUpsert, usdc, withinLimit } from "../_db.js";
+import { MATCH_RENT_LAMPORTS, requireFeeFunds, preflight, ata, connection, authority, endpoint, entryUnits, HttpError, mint, newMatchId, parsePubkey, program, tierById } from "../_lib.js";
+import { DB_ENABLED, dbUpsert, usdc, withinLimit, withinSharedLimit } from "../_db.js";
 
 /**
  * POST /api/match/open  { tier }  →  { id, entry }
@@ -17,7 +17,29 @@ export const maxDuration = 60;
 export const POST = endpoint(async (body) => {
   const tier = tierById(body.tier);
   if (!tier) throw new HttpError(400, "unknown tier");
-  await requireFeeFunds(connection(), authority().publicKey);
+  // When the balance was read, not when its answer came: a slow answer must
+  // not move an opening into a window apart from one that read the same.
+  const at = Math.floor(Date.now() / 1000);
+  const balance = await requireFeeFunds(connection(), authority().publicKey, 10_000_000 + MATCH_RENT_LAMPORTS);
+  // Openings at the same moment all read the balance before any has paid its
+  // rent, so each passed the check above and together they could take the
+  // platform below what cleanup needs (security review, 2026-10-13). Counted
+  // across every instance: no more openings in two minutes than the balance
+  // covers with the floor left over. Two windows, half a window apart, so
+  // openings under a minute apart (longer than one can take: maxDuration)
+  // always share one, whenever a window turns over. Well above the floor this
+  // is dozens; only near it does it refuse, a little early rather than late.
+  const covers = Math.floor((balance - 10_000_000) / MATCH_RENT_LAMPORTS);
+  // Near the floor (fewer than ten openings left) only the shared count will
+  // do, and none when the database cannot answer; well above it, a database
+  // blip must not stop matches opening, so each instance counts for itself.
+  const count = covers < 10 ? withinSharedLimit : withinLimit;
+  for (const [i, window] of [Math.floor(at / 120), Math.floor((at + 60) / 120)].entries()) {
+    if (!await count(`open:rent:${i}:${window}`, covers, 180)) {
+      console.error("[api] openings would pass the SOL floor", { balance, covers });
+      throw new HttpError(503, "Can't do that right now. Try again in a minute.");
+    }
+  }
   const id = newMatchId();
   const entry = entryUnits(tier);
   // The room names the player it is opening for; a wallet without the entry

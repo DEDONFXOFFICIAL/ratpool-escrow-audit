@@ -1,5 +1,5 @@
-import { preflight, endpoint, HttpError, parsePubkey, signedBy } from "./_lib.js";
-import { DB_ENABLED, dbUpsert } from "./_db.js";
+import { preflight, endpoint, HttpError, ipKey, parsePubkey, signedBy } from "./_lib.js";
+import { DB_ENABLED, dbSelect, dbUpsert, withinLimit } from "./_db.js";
 import { readAccountState, saveAccountState } from "./_account.js";
 import { isReferralMessage, referralMessage, verifyReferral } from "./_referral.js";
 
@@ -27,6 +27,8 @@ import { isReferralMessage, referralMessage, verifyReferral } from "./_referral.
  */
 const MAX_AGE_MS = 10 * 60 * 1000;
 const NAME_MAX = 24;
+/** A profile message is a name and a rat's traits: a few hundred characters. */
+const PROFILE_MAX = 2048;
 
 export const POST = endpoint(async (body, req) => {
   if (!DB_ENABLED) throw new HttpError(503, "no database configured");
@@ -38,7 +40,7 @@ export const POST = endpoint(async (body, req) => {
 
   // The rest of the account (settings, loadout, record) rides the same door:
   // a function of its own would pass the hosting plan's limit of twelve.
-  if (message.startsWith("RatPool account\n")) return saveAccountState(body);
+  if (message.startsWith("RatPool account\n")) return saveAccountState(body, req!);
   if (message.startsWith("RatPool account read\n")) return readAccountState(body);
   // And invites (api/_referral.ts), for the same reason.
   if (isReferralMessage(message)) return referralMessage(body, req);
@@ -49,6 +51,12 @@ export const POST = endpoint(async (body, req) => {
     return l ? l.slice(k.length + 2) : null;
   };
   if (lines[0] !== "RatPool profile") throw new HttpError(400, "not a profile message");
+  // Bounded, and counted per network before any work: a wallet costs nothing
+  // to make, so saves from a script making fresh ones were unlimited in
+  // number and in size (traits of any length), and could fill the database
+  // the whole platform runs on (red-team review, 2026-10-13).
+  if (message.length > PROFILE_MAX) throw new HttpError(413, "profile too large");
+  if (!(await withinLimit(`profile:ip:${ipKey(req!)}`, 120, 3600))) throw new HttpError(429, "Too many saves. Try again later.");
   const wallet = parsePubkey(field("wallet"));
   const name = (field("name") ?? "").trim();
   const traitsRaw = field("traits");
@@ -69,6 +77,17 @@ export const POST = endpoint(async (body, req) => {
   }
 
   if (!signedBy(wallet, message, signature)) throw new HttpError(401, "signature does not match the wallet");
+  // Per wallet only once its signature is checked, so nobody can use up a
+  // player's saves in their name; and a new profile is counted apart.
+  if (!(await withinLimit(`profile:w:${wallet.toBase58()}`, 30, 3600))) throw new HttpError(429, "Too many saves. Try again later.");
+  const existing = await dbSelect<{ wallet: string }>(`profiles?wallet=eq.${wallet.toBase58()}&select=wallet&limit=1`);
+  if (existing === null) throw new HttpError(502, "the profile could not be saved");
+  if (
+    !existing.length &&
+    (!(await withinLimit(`profile:new:ip:${ipKey(req!)}`, 50, 86400)) || !(await withinLimit("profile:new:all", 3000, 86400)))
+  ) {
+    throw new HttpError(429, "Too many new players right now. Try again later.");
+  }
 
   const written = await dbUpsert("profiles", {
     wallet: wallet.toBase58(),

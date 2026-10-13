@@ -1,5 +1,5 @@
 import { PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
-import { dbInsertNew, dbSelect, withinLimit } from "../_db.js";
+import { dbInsertNew, dbSelect, withinLimit, withinSharedLimit } from "../_db.js";
 import { PAST_STORE_TREASURIES, purchaseMemo, STORE_PRICES } from "../../src/economy/prices.js";
 import {
   createAssociatedTokenAccountIdempotentInstruction,
@@ -56,9 +56,12 @@ export const POST = endpoint(async (body, req) => {
   const from = parsePubkey(body.from);
   requireOutsideWallet(from);
   const item = typeof body.item === "string" ? body.item : null;
-  if (item !== null && !(STORE_PRICES[item] > 0)) throw new HttpError(400, "That isn't for sale");
-  if (item && typeof body.confirm === "string") return confirmPurchase(from, item, body.confirm, req!);
-  const amount = item ? STORE_PRICES[item] : Number(body.amount);
+  // An item, always: the old form that named its own amount (builds before
+  // the purchase record, long since required to update) let a payment of a
+  // single base unit be sponsored over and over (security review, 2026-10-13).
+  if (item === null || !(STORE_PRICES[item] > 0)) throw new HttpError(400, "That isn't for sale");
+  if (typeof body.confirm === "string") return confirmPurchase(from, item, body.confirm, req!);
+  const amount = STORE_PRICES[item];
   if (!Number.isFinite(amount) || amount <= 0) throw new HttpError(400, "Nothing to pay");
   const units = BigInt(Math.round(amount * 10 ** USDC_DECIMALS));
   if (units <= 0n) throw new HttpError(400, "Nothing to pay");
@@ -75,7 +78,12 @@ export const POST = endpoint(async (body, req) => {
     if (have.length) return { owned: true };
   }
 
-  if (!await withinLimit(`store:w:${from.toBase58()}`, 30, 3600)) {
+  // Per wallet, per network and overall: the platform pays each payment's fee.
+  if (
+    !await withinLimit(`store:w:${from.toBase58()}`, 30, 3600) ||
+    !await withinLimit(`store:ip:${ipKey(req!)}`, 120, 3600) ||
+    !await withinSharedLimit("store:all", 2000, 3600)
+  ) {
     throw new HttpError(429, "Too many purchases — try again later.");
   }
 
@@ -86,10 +94,11 @@ export const POST = endpoint(async (body, req) => {
   const treasury = (await program().account.config.fetch(configPda())).feeWallet;
 
   const source = ata(from);
-  const held = await getAccount(conn, source).then(
-    (a) => a.amount,
-    () => 0n,
-  );
+  // Still this wallet's account: one whose owner was changed fails on chain
+  // after the platform has paid the fee (security review, 2026-10-13).
+  const src = await getAccount(conn, source).catch(() => null);
+  if (src && (!src.owner.equals(from) || src.isFrozen)) throw new HttpError(400, "This wallet's USDC account can't pay right now.");
+  const held = src?.amount ?? 0n;
   if (held < units) {
     throw new HttpError(
       400,

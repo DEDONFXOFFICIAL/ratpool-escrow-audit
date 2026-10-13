@@ -57,10 +57,23 @@ function withinFallback(key: string, max: number, windowSeconds: number): boolea
   return true;
 }
 
-export async function withinLimit(key: string, max: number, windowSeconds: number): Promise<boolean> {
+/**
+ * An overall ceiling on something the platform pays for (the faucet's mint,
+ * transfers, store payments): counted only where every instance counts it,
+ * the database. When it cannot answer, refused rather than counted in each
+ * instance's memory, which multiplied the ceiling by however many instances
+ * were running (security review, 2026-10-13). Per wallet and per network
+ * limits keep the local fallback; joins never use this.
+ */
+export function withinSharedLimit(key: string, max: number, windowSeconds: number): Promise<boolean> {
+  return withinLimit(key, max, windowSeconds, true);
+}
+
+export async function withinLimit(key: string, max: number, windowSeconds: number, shared = false): Promise<boolean> {
+  const local = (): boolean => (shared ? false : withinFallback(key, max, windowSeconds));
   if (!DB_ENABLED) {
     warnLimitUnavailable();
-    return withinFallback(key, max, windowSeconds);
+    return local();
   }
   // Every signed room call now spends a nonce row, so the old windows are
   // swept now and then instead of never (clear_old_limits, 2026-09-29 migration).
@@ -92,16 +105,16 @@ export async function withinLimit(key: string, max: number, windowSeconds: numbe
       } else {
         console.error(`[db] bump_limit failed: ${res.status} ${detail}`);
       }
-      return withinFallback(key, max, windowSeconds);
+      return local();
     }
     // Only a plain true lets the request through; anything else is the database not answering.
     const allowed: unknown = await res.json();
     if (typeof allowed === "boolean") return allowed;
     console.error("[db] bump_limit returned an unexpected response", allowed);
-    return withinFallback(key, max, windowSeconds);
+    return local();
   } catch (e) {
     console.error("[db] bump_limit failed:", e);
-    return withinFallback(key, max, windowSeconds);
+    return local();
   }
 }
 

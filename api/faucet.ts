@@ -1,5 +1,5 @@
 import { getAccount, getOrCreateAssociatedTokenAccount, mintTo } from "@solana/spl-token";
-import { withinLimit } from "./_db.js";
+import { withinLimit, withinSharedLimit } from "./_db.js";
 import { requireFeeFunds, preflight, ata, authority, connection, endpoint, faucetAuthority, HttpError, ipKey, mint, parsePubkey, requireWalletProof, USDC_DECIMALS } from "./_lib.js";
 import { FAUCET_DETAIL } from "../src/chain/walletRequest.js";
 
@@ -25,6 +25,10 @@ export const POST = endpoint(async (body, req) => {
   }
   const wallet = parsePubkey(body.wallet);
   const key = wallet.toBase58();
+  // Asks per network, before the signature is checked and its one-time
+  // number stored, and before the chain is read: a refused ask used to cost
+  // both, unlimited (security review, 2026-10-13).
+  if (!await withinLimit(`faucet:ask:ip:${ipKey(req!)}`, 120, 3600)) throw new HttpError(429, "Too many claims — try again later.");
   // Only the wallet itself can claim: naming someone else's spent their claims.
   await requireWalletProof(body, wallet, "faucet", FAUCET_DETAIL);
   // Whether the wallet needs a refill, read before any allowance is counted:
@@ -38,7 +42,7 @@ export const POST = endpoint(async (body, req) => {
     !await withinLimit(`faucet:w:${key}`, 1, 600)
     || !await withinLimit(`faucet:wd:${key}`, 6, 86400)
     || !await withinLimit(`faucet:ip:${ipKey(req!)}`, 10, 3600)
-    || !await withinLimit("faucet:all", 400, 86400)
+    || !await withinSharedLimit("faucet:all", 400, 86400)
   ) {
     throw new HttpError(429, "Too many claims — try again later.");
   }

@@ -721,6 +721,18 @@ export class ChainEconomy implements EconomyService {
   }
 
   /** This wallet's standing in a match, as the chain has it. */
+  /** See EconomyService.stakeStatus: null when the match is gone or unreadable. */
+  async stakeStatus(matchId: string): Promise<string | null> {
+    try {
+      const match = await escrowProgram(this.connection, this.wallet).account.match.fetchNullable(matchPda(BigInt(matchId)));
+      if (!match) return null;
+      const player = match.players.find((p) => p.key.equals(this.owner));
+      return player ? enumKey<PlayerStatus>(player.status) : "none";
+    } catch {
+      return null;
+    }
+  }
+
   private async statusIn(id: bigint): Promise<PlayerStatus | "none"> {
     const match = await escrowProgram(this.connection, this.wallet).account.match.fetchNullable(matchPda(id));
     const player = match?.players.find((p) => p.key.equals(this.owner));

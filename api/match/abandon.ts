@@ -1,5 +1,5 @@
 import { enumKey, matchPda, toBn } from "../../src/chain/escrow.js";
-import { requireFeeFunds, preflight, authority, endpoint, parseId, parsePubkey, program } from "../_lib.js";
+import { RECOVERY_FLOOR_LAMPORTS, requireFeeFunds, preflight, authority, endpoint, parseId, parsePubkey, program } from "../_lib.js";
 import { closeFinished, refundAll, sweepOwed } from "../_refund.js";
 import { dbSelect, dbUpdate } from "../_db.js";
 
@@ -30,7 +30,7 @@ export const POST = endpoint(async (body) => {
     const awake = (await dbSelect<{ id: string }>("matches?select=id&limit=1")) !== null;
     const p = program();
     const auth = authority().publicKey;
-    await requireFeeFunds(p.provider.connection, auth);
+    await requireFeeFunds(p.provider.connection, auth, RECOVERY_FLOOR_LAMPORTS);
     // No new transaction after 20 s: one sent then has the rest of the
     // function's 60 s to confirm.
     return { ok: true, awake, ...(await sweepOwed(p, auth, Date.now() + 20_000)) };
@@ -38,7 +38,7 @@ export const POST = endpoint(async (body) => {
   const id = parseId(body.id);
   const p = program();
   const auth = authority().publicKey;
-  await requireFeeFunds(p.provider.connection, auth);
+  await requireFeeFunds(p.provider.connection, auth, RECOVERY_FLOOR_LAMPORTS);
   const key = matchPda(id);
 
   const info = await p.provider.connection.getAccountInfo(key);

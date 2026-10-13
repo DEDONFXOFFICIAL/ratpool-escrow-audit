@@ -1,5 +1,5 @@
-import { HttpError, parsePubkey, signedBy } from "./_lib.js";
-import { DB_ENABLED, dbInsertNew, dbPatchCount, dbSelect } from "./_db.js";
+import { HttpError, ipKey, parsePubkey, signedBy } from "./_lib.js";
+import { DB_ENABLED, dbInsertNew, dbPatchCount, dbSelect, withinLimit } from "./_db.js";
 
 /**
  * POST /api/profile with an account message  →  { ok }  (routed by api/profile.ts;
@@ -23,13 +23,17 @@ const MAX_AGE_MS = 10 * 60 * 1000;
 const MAX_AHEAD_MS = 10 * 60 * 1000;
 const MAX_STATE = 64 * 1024;
 
-export async function saveAccountState(body: Record<string, unknown>): Promise<{ ok: true }> {
+export async function saveAccountState(body: Record<string, unknown>, req: Request): Promise<{ ok: true }> {
   if (!DB_ENABLED) throw new HttpError(503, "no database configured");
   const { message, signature } = body;
   if (typeof message !== "string" || typeof signature !== "string") {
     throw new HttpError(400, "message and signature required");
   }
   if (message.length > MAX_STATE) throw new HttpError(413, "account state too large");
+  // Counted per network before any work: fresh wallets cost nothing, and
+  // saves from a script making them were unlimited (red-team review,
+  // 2026-10-13). A player's own saves come a few a minute at most.
+  if (!(await withinLimit(`acct:ip:${ipKey(req)}`, 1200, 3600))) throw new HttpError(429, "Too many saves. Try again later.");
 
   const lines = message.split("\n");
   const field = (k: string) => {
@@ -52,6 +56,9 @@ export async function saveAccountState(body: Record<string, unknown>): Promise<{
     throw new HttpError(400, "state is not an object");
   }
   if (!signedBy(wallet, message, signature)) throw new HttpError(401, "signature does not match the wallet");
+  // Per wallet only once its signature is checked: nobody can use up a
+  // player's saves in their name.
+  if (!(await withinLimit(`acct:w:${wallet.toBase58()}`, 600, 3600))) throw new HttpError(429, "Too many saves. Try again later.");
 
   // Never older over newer: a signed save replayed later, or a slow one
   // arriving after a newer device's, used to roll the account back (review
@@ -64,6 +71,10 @@ export async function saveAccountState(body: Record<string, unknown>): Promise<{
   if (updated === null) throw new HttpError(502, "the account could not be saved");
   if (updated > 0) return { ok: true };
   // Nothing older to replace: the first save of this account, or a newer one is there.
+  // A new account is counted apart, per network and overall.
+  if (!(await withinLimit(`acct:new:ip:${ipKey(req)}`, 50, 86400)) || !(await withinLimit("acct:new:all", 3000, 86400))) {
+    throw new HttpError(429, "Too many new players right now. Try again later.");
+  }
   const created = await dbInsertNew("accounts", { wallet: w, state, updated_at: at });
   if (created === "ok") return { ok: true };
   if (created === "exists") throw new HttpError(409, "a newer save exists");

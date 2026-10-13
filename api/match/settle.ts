@@ -286,8 +286,13 @@ async function record(id: bigint, stakers: string[], ranking: string[], pay: Pay
       ),
     );
   }
-  const recorded = !DB_ENABLED || (wrote.every(Boolean) && !pay.unpaired);
+  // Referrals that could not be paired do not hold the match open: a record
+  // written after the payout never goes away, so writing again never pairs
+  // them, and waiting on it kept the match's rent from coming back (security
+  // review, 2026-10-13). Logged instead, to be credited by hand.
+  const recorded = !DB_ENABLED || wrote.every(Boolean);
   if (!recorded) console.error("[settle] paid, but the record is incomplete; the room will write it again", { id: id.toString() });
+  if (pay.unpaired) console.error("[settle] referral earnings left unrecorded: could not pair them with the podium", { id: id.toString(), signature: pay.signature });
 
   return {
     pool: Number(pay.pool),

@@ -26,7 +26,7 @@ import {
   type EscrowProgram,
   type MatchAccount,
 } from "../src/chain/escrow.js";
-import { ata, authority, HttpError, mint, ROOM_KEY, signedBytesByRoom } from "./_lib.js";
+import { ata, authority, HttpError, mint, onlySol, ROOM_KEY, signedBytesByRoom } from "./_lib.js";
 
 /** Mirrors the program: podium shares in percent, best first. */
 const PODIUM_SHARES = [50n, 30n, 20n];
@@ -120,7 +120,7 @@ export async function paySigned(p: EscrowProgram, id: bigint, m: MatchAccount, s
     // 2026-10-12). For a wallet it is the same account as ata().
     const usual = getAssociatedTokenAddressSync(mint(), owner, true, TOKEN_PROGRAM_ID);
     const info = await conn.getAccountInfo(usual, "confirmed");
-    if (!info) {
+    if (!info || onlySol(info)) {
       creates.push(createAssociatedTokenAccountIdempotentInstruction(auth.publicKey, usual, owner, mint(), TOKEN_PROGRAM_ID));
       return usual;
     }

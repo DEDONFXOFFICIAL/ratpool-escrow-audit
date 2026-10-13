@@ -73,15 +73,20 @@ export async function referralMessage(body: Record<string, unknown>, req?: Reque
   if (!Number.isFinite(issued) || Math.abs(Date.now() - issued) > MAX_AGE_MS) throw new HttpError(400, "signature too old");
   if (!signedBy(wallet, message, signature)) throw new HttpError(401, "signature does not match the wallet");
   const w = wallet.toBase58();
-  if (lines[0] === "RatPool referral") return withRecord(w, await myReferral(w));
+  if (lines[0] === "RatPool referral") return withRecord(w, await myReferral(w, req));
   if (lines[0] === "RatPool referral claim") return withRecord(w, await claim(w, field("code"), req));
   throw new HttpError(400, "not a referral message");
 }
 
 /** The player's code, made the first time they ask, and who has used it. */
-async function myReferral(w: string) {
+async function myReferral(w: string, req?: Request) {
   const codeOf = async () => (await dbSelect<{ code: string }>(`referral_codes?wallet=eq.${w}&select=code`))?.[0]?.code ?? null;
   let code = await codeOf();
+  // A new code is a row kept for good, and wallets cost nothing: counted per
+  // network and overall, as new profiles are (security review, 2026-10-13).
+  if (!code && (!(await withinLimit(`ref:new:ip:${ipKey(req!)}`, 50, 86400)) || !(await withinLimit("ref:new:all", 3000, 86400)))) {
+    throw new HttpError(429, "Too many new invites. Try again later.");
+  }
   for (let tries = 0; !code && tries < 6; tries++) {
     const candidate = Array.from({ length: 6 }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]).join("");
     const r = await dbInsertNew("referral_codes", { wallet: w, code: candidate });

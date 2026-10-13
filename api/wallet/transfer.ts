@@ -1,5 +1,5 @@
 import { Transaction } from "@solana/web3.js";
-import { withinLimit } from "../_db.js";
+import { withinLimit, withinSharedLimit } from "../_db.js";
 import {
   createAssociatedTokenAccountIdempotentInstruction,
   createTransferCheckedInstruction,
@@ -8,7 +8,7 @@ import {
   unpackAccount,
 } from "@solana/spl-token";
 import { TOKEN_PROGRAM_ID } from "../../src/chain/escrow.js";
-import { requireFeeFunds, preflight, ata, authority, connection, endpoint, HttpError, ipKey, mint, parsePubkey, requireOutsideWallet, requireWalletProof, USDC_DECIMALS } from "../_lib.js";
+import { requireFeeFunds, preflight, ata, authority, connection, endpoint, HttpError, ipKey, mint, onlySol, parsePubkey, requireOutsideWallet, requireWalletProof, USDC_DECIMALS } from "../_lib.js";
 import { sendDetail } from "../../src/chain/walletRequest.js";
 
 /**
@@ -55,7 +55,7 @@ export const POST = endpoint(async (body, req) => {
   if (
     !await withinLimit(`xfer:w:${from.toBase58()}`, 30, 3600) ||
     !await withinLimit(`xfer:ip:${ipKey(req!)}`, 120, 3600) ||
-    !await withinLimit("xfer:all", 3000, 3600)
+    !await withinSharedLimit("xfer:all", 3000, 3600)
   ) {
     throw new HttpError(429, "Too many transfers — try again later.");
   }
@@ -65,21 +65,24 @@ export const POST = endpoint(async (body, req) => {
   await requireFeeFunds(conn, auth.publicKey);
   const m = mint();
   const source = ata(from);
-  const held = await getAccount(conn, source).then(
-    (a) => a.amount,
-    () => 0n,
-  );
+  // The account the transfer spends must still be this wallet's: one whose
+  // owner was changed fails on chain after the platform has paid its fee, and
+  // fresh wallets made that a way to spend the fee money (security review,
+  // 2026-10-13).
+  const src = await getAccount(conn, source).catch(() => null);
+  if (src && (!src.owner.equals(from) || src.isFrozen)) throw new HttpError(400, "This wallet's USDC account can't send right now.");
+  const held = src?.amount ?? 0n;
   if (held < units) {
     throw new HttpError(400, `Only ${(Number(held) / 10 ** USDC_DECIMALS).toFixed(2)} USDC to send`);
   }
 
   const destination = getAssociatedTokenAddressSync(m, to, true, TOKEN_PROGRAM_ID);
   const info = await conn.getAccountInfo(destination);
-  const missing = !info;
+  const missing = !info || onlySol(info);
   // An account that is there must still be the address's own: one whose owner
   // was changed would have paid that new owner, not the address the player
   // typed (review 2026-10-07).
-  if (info) {
+  if (!missing) {
     let usable = false;
     try {
       const acct = unpackAccount(destination, info, TOKEN_PROGRAM_ID);
@@ -96,7 +99,7 @@ export const POST = endpoint(async (body, req) => {
     missing &&
     (!await withinLimit(`xfer:new:${from.toBase58()}`, 5, 86400) ||
       !await withinLimit(`xfer:new:ip:${ipKey(req!)}`, 10, 86400) ||
-      !await withinLimit("xfer:new:all", 60, 86400))
+      !await withinSharedLimit("xfer:new:all", 60, 86400))
   ) {
     throw new HttpError(429, "Too many new destinations — try again later.");
   }

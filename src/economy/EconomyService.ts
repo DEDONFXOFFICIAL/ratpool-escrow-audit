@@ -70,6 +70,12 @@ export interface EconomyService {
   stakeInto?(matchId: string, tier: PriceTier, admit?: { exp: number; sig: string } | null): Promise<void>;
   /** Revoke the pending or supplied match approval before collection. Chain build only. */
   unstake?(matchId?: string): Promise<void>;
+  /**
+   * This wallet's place in a match as the chain has it ("collected", "paid",
+   * "refunded", "joined", "dropped", or "none" when not listed), or null when
+   * the chain cannot say (the match closed, or unreadable). Chain build only.
+   */
+  stakeStatus?(matchId: string): Promise<string | null>;
 
   /**
    * Collect this player's stake into the match pool. Called only once a lobby

@@ -1,5 +1,5 @@
 import { createHash, createPublicKey, randomBytes, verify } from "node:crypto";
-import { Connection, Keypair, PublicKey } from "@solana/web3.js";
+import { Connection, Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Wallet } from "@anchor-lang/core";
 import { escrowProgram, TOKEN_PROGRAM_ID, type EscrowProgram } from "../src/chain/escrow.js";
@@ -113,13 +113,39 @@ export function connection(): Connection {
   return new Connection(process.env.SOLANA_RPC || "https://api.devnet.solana.com", "confirmed");
 }
 
+/**
+ * Opening a match pays its account's and its vault's rent (about 0.03 SOL),
+ * which comes back when the match closes. Checked on top of the usual floor,
+ * so an opening never leaves the platform below it (security review,
+ * 2026-10-13).
+ */
+export const MATCH_RENT_LAMPORTS = 30_000_000;
+/**
+ * The cleanup (cancelling, refunding, closing) pays only its fees and gives
+ * rent back, so it runs on far less than the usual floor: under the floor it
+ * used to stop, and with it the rent that would have refilled the platform.
+ */
+export const RECOVERY_FLOOR_LAMPORTS = 3_000_000;
+
+/**
+ * Nothing but SOL at a token account's address: anyone can send SOL to an
+ * address before its account is made. The account program makes the account
+ * over it all the same, so it counts as missing: read as "there, but not a
+ * token account", it sent payouts to a spare account and refused transfers
+ * (security review, 2026-10-13).
+ */
+export function onlySol(info: { owner: PublicKey; data: { length: number } } | null): boolean {
+  return !!info && info.owner.equals(SystemProgram.programId) && info.data.length === 0;
+}
+
 /** Reject unfunded actions before building or signing a transaction. */
-export async function requireFeeFunds(conn: Connection, payer: PublicKey, lamports = 10_000_000): Promise<void> {
+export async function requireFeeFunds(conn: Connection, payer: PublicKey, lamports = 10_000_000): Promise<number> {
   const balance = await conn.getBalance(payer);
   if (balance < lamports) {
     console.error("[api] insufficient fee funds", { payer: payer.toBase58(), balance, required: lamports });
     throw new HttpError(503, "Can't do that right now. Try again in a minute.");
   }
+  return balance;
 }
 
 export function mint(): PublicKey {
