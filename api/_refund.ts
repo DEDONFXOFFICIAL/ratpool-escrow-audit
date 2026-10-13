@@ -57,6 +57,12 @@ const MATCH_DISCRIMINATOR = bs58.encode(
 
 /** Longer than a collect call can run (maxDuration 60). */
 const GRACE_S = 120;
+/**
+ * An open match nothing was ever collected into, this old, has no room
+ * left filling it (a room's minute starts again only while someone waits
+ * in it). Its id is its creation time in ms x 1000 (newMatchId).
+ */
+const STALE_OPEN_MS = 48 * 3600_000;
 
 export interface SweepResult {
   /** Matches on chain. */
@@ -107,7 +113,14 @@ export async function sweepOwed(p: EscrowProgram, payer: PublicKey, until: numbe
     // Before its deadline a collected match is still the room's to pay out.
     // An open one past it holds stakes from a collection cut off before the
     // start; the program refunds those too, and the last refund cancels it.
-    const due = state === "cancelled" || (state === "collected" && expired) || (state === "open" && expired && owed > 0);
+    // An open match whose opening reply was lost: the room never heard its
+    // id and closed without asking for it to be closed, and with nothing
+    // ever collected it has no deadline, so it held its rent for good
+    // (review, 2026-10-12). Nobody could join it (the room never had its id),
+    // so only an empty one: cancelled, then closed like the rest.
+    const createdMs = Number(BigInt(m.id.toString()) / 1000n);
+    const staleOpen = state === "open" && refundAfter === 0 && m.players.length === 0 && Date.now() - createdMs > STALE_OPEN_MS;
+    const due = state === "cancelled" || (state === "collected" && expired) || (state === "open" && expired && owed > 0) || staleOpen;
     if (!due) continue;
     // A short pool is cancelled and refunded in the one call that collected
     // it (api/match/collect.ts); one whose first stake was taken moments ago
@@ -133,6 +146,7 @@ export async function sweepOwed(p: EscrowProgram, payer: PublicKey, until: numbe
     // Nothing is owed now; the close only reclaims rent, and can wait a sweep.
     if (Date.now() > until) continue;
     try {
+      if (staleOpen) await p.methods.cancel(toBn(id)).accountsPartial({ authority: payer }).rpc();
       await closeFinished(p, id, await p.account.match.fetch(pubkey), payer);
       if (!owed) await dbUpdate("matches", { id: id.toString() }, { state: "closed" });
     } catch (e) {

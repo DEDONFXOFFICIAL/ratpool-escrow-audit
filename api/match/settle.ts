@@ -49,7 +49,10 @@ export const POST = endpoint(async (body) => {
   // Paid already, by an earlier call whose answer never arrived (or paid and
   // closed since): the chain's receipt says who got what.
   if (state === "settled" || state === "closed") {
-    const done = await findSettlement(p, id);
+    // The room sends the payout it already saw: read directly, it cannot be
+    // buried under transactions others sent to the match's account.
+    const hint = typeof body.paidSig === "string" && /^[1-9A-HJ-NP-Za-km-z]{64,90}$/.test(body.paidSig) ? body.paidSig : undefined;
+    const done = await findSettlement(p, id, hint);
     if (!done) {
       if (state === "closed") throw new HttpError(410, "match was closed without a payout");
       throw new HttpError(503, "match is paid; its receipt cannot be read yet");
@@ -148,28 +151,12 @@ async function sendClose(p: EscrowProgram, id: bigint, feeWallet: PublicKey): Pr
  * back with the finishers who earned them through the database; if it
  * cannot be read they are left out, and record() reports the gap.
  */
-async function findSettlement(p: EscrowProgram, id: bigint): Promise<(Payout & { unpaired: boolean }) | null> {
+async function findSettlement(p: EscrowProgram, id: bigint, hint?: string): Promise<(Payout & { unpaired: boolean }) | null> {
   const conn = p.provider.connection;
   const parser = new EventParser(p.programId, p.coder);
-  // The match's whole history, not only its last fifty entries: anyone can
-  // name the match's account in transactions of their own, and fifty of them
-  // hid the payout from this search for good (review, 2026-10-12). The last
-  // fifty first, where a payout normally is (it and the close are the
-  // newest); then the rest from the start, where the payout comes within the
-  // match's own short history however much was added after it. Bounded.
-  const sigs: Awaited<ReturnType<typeof conn.getSignaturesForAddress>> = [];
-  for (let before: string | undefined, page = 0; page < 20; page++) {
-    const batch = await conn.getSignaturesForAddress(matchPda(id), { limit: 1000, before });
-    sigs.push(...batch);
-    if (batch.length < 1000) break;
-    before = batch[batch.length - 1].signature;
-  }
-  const order = [...sigs.slice(0, 50), ...sigs.slice(50).reverse()];
-  let looked = 0;
-  for (const s of order) {
-    if (++looked > 400) break;
-    if (s.err) continue;
-    const tx = await conn.getTransaction(s.signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
+  // One transaction, read for this match's payout (MatchSettled, this id).
+  const readOne = async (signature: string): Promise<(Payout & { unpaired: boolean }) | null> => {
+    const tx = await conn.getTransaction(signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
     for (const ev of parser.parseLogs(tx?.meta?.logMessages ?? [])) {
       // "matchSettled" or "MatchSettled", by which IDL the coder was built from.
       if (ev.name.toLowerCase() !== "matchsettled") continue;
@@ -205,7 +192,7 @@ async function findSettlement(p: EscrowProgram, id: bigint): Promise<(Payout & {
         }
       }
       return {
-        signature: s.signature,
+        signature,
         pool: BigInt(String(d.pool)),
         fee: BigInt(String(d.fee)),
         winners,
@@ -214,6 +201,33 @@ async function findSettlement(p: EscrowProgram, id: bigint): Promise<(Payout & {
         unpaired,
       };
     }
+    return null;
+  };
+  // The payout the room already saw, when it says so: read first, directly.
+  if (hint) {
+    const got = await readOne(hint).catch(() => null);
+    if (got) return got;
+  }
+  // The match's whole history, not only its last fifty entries: anyone can
+  // name the match's account in transactions of their own, and fifty of them
+  // hid the payout from this search for good (review, 2026-10-12). The last
+  // fifty first, where a payout normally is (it and the close are the
+  // newest); then the rest from the start, where the payout comes within the
+  // match's own short history however much was added after it. Bounded.
+  const sigs: Awaited<ReturnType<typeof conn.getSignaturesForAddress>> = [];
+  for (let before: string | undefined, page = 0; page < 20; page++) {
+    const batch = await conn.getSignaturesForAddress(matchPda(id), { limit: 1000, before });
+    sigs.push(...batch);
+    if (batch.length < 1000) break;
+    before = batch[batch.length - 1].signature;
+  }
+  const order = [...sigs.slice(0, 50), ...sigs.slice(50).reverse()];
+  let looked = 0;
+  for (const s of order) {
+    if (++looked > 400) break;
+    if (s.err) continue;
+    const got = await readOne(s.signature);
+    if (got) return got;
   }
   return null;
 }

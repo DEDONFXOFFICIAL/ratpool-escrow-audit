@@ -24,11 +24,23 @@ const ANON = env.VITE_SUPABASE_ANON_KEY || null;
 
 export const DB_ENABLED = CHAIN_ENABLED && DB_URL !== null && ANON !== null;
 
+/**
+ * A deadline for a request: an answer that has not come by then is treated
+ * as none (the callers already handle a failed read). A stalled read held up
+ * sign-in's account sync, and with it every save, for as long as it hung
+ * (review, 2026-10-12). Six seconds for the database, as the server allows
+ * itself (api/_db.ts); longer for the site's functions, which can start cold.
+ */
+function deadline(ms: number): AbortSignal | undefined {
+  return typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(ms) : undefined;
+}
+
 async function select<T>(path: string): Promise<T | null> {
   if (!DB_ENABLED) return null;
   try {
     const res = await fetch(`${DB_URL}/rest/v1/${path}`, {
       headers: { apikey: ANON!, authorization: `Bearer ${ANON}` },
+      signal: deadline(6_000),
     });
     if (!res.ok) {
       console.warn(`[db] ${path} → ${res.status}`);
@@ -48,6 +60,7 @@ async function count(path: string): Promise<number | null> {
     const res = await fetch(`${DB_URL}/rest/v1/${path}`, {
       method: "HEAD",
       headers: { apikey: ANON!, authorization: `Bearer ${ANON}`, prefer: "count=exact" },
+      signal: deadline(6_000),
     });
     const range = res.headers.get("content-range") ?? "";
     const n = Number(range.split("/")[1]);
@@ -223,11 +236,14 @@ export async function fetchBoard(self: string, selfName: string): Promise<Board 
     const above = await count(`leaderboard?select=wallet&skulls=gt.${skulls}`);
     const all = await count("leaderboard?select=wallet");
     if (above === null || all === null) return null;
-    const rank = above + 1;
+    // Not in the list means below it: players tied on skulls are listed by
+    // name, so counting only those above could rank someone inside the list
+    // they were not in, and they were shown nowhere (review, 2026-10-12).
+    const rank = mine[0] ? Math.max(above + 1, rows.length + 1) : above + 1;
     total = all + (mine[0] ? 0 : 1);
     selfRow = { rank, name: selfName || "You", skulls, isSelf: true };
   }
-  return { top, self: selfRow, total, selfOffBoard: selfRow.rank > BOARD_SIZE };
+  return { top, self: selfRow, total, selfOffBoard: !top.some((r) => r.isSelf) };
 }
 
 /**
@@ -236,6 +252,17 @@ export async function fetchBoard(self: string, selfName: string): Promise<Board 
  * Null when the match has not been settled (or the database is off), so a
  * walked-out match can be told apart from one still running.
  */
+/**
+ * What the database says became of a match ("settled", "refunded",
+ * "closed", ...), or null if it cannot say. A match refunded instead of paid
+ * has no board, and its record used to wait for one for ever (review,
+ * 2026-10-12).
+ */
+export async function fetchMatchState(matchId: string): Promise<string | null> {
+  const rows = await select<{ state: string }[]>(`matches?id=eq.${encodeURIComponent(matchId)}&select=state`);
+  return rows?.[0]?.state ?? null;
+}
+
 export async function fetchMatchBoard(
   matchId: string,
 ): Promise<{ wallet: string; name: string; rank: number; payout: number; skulls: number }[] | null> {
@@ -293,6 +320,7 @@ async function postSigned<T>(message: string, signMessage: SignMessage): Promise
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ message, signature }),
+    signal: deadline(10_000),
   });
   const text = await res.text();
   let data: unknown = null;
