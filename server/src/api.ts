@@ -45,6 +45,10 @@ export interface Env {
   COMBAT_CHECKS?: string;
   /** The escrow program's id: a signed ranking names it (signSettlement). */
   ESCROW_PROGRAM?: string;
+  /** The sign-in service's (Privy's) app id, for the Google sign-in check (google.ts). */
+  PRIVY_APP_ID?: string;
+  /** "require": a pool seat needs a Google sign-in. Unset: counted only. */
+  ROOM_GOOGLE?: string;
 }
 
 const hex = (buf: ArrayBuffer) =>
