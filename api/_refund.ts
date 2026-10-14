@@ -2,8 +2,8 @@ import type { PublicKey } from "@solana/web3.js";
 import { createAssociatedTokenAccountIdempotentInstruction, getMinimumBalanceForRentExemptAccount } from "@solana/spl-token";
 import bs58 from "bs58";
 import { collectedPlayers, enumKey, IDL, PROGRAM_ID, toBn, TOKEN_PROGRAM_ID, type EscrowProgram, type MatchAccount } from "../src/chain/escrow.js";
-import { ata, mint, onlySol, RECOVERY_FLOOR_LAMPORTS, requireFeeFunds } from "./_lib.js";
-import { dbUpdate } from "./_db.js";
+import { ata, mint, onlySol, requireFeeFunds } from "./_lib.js";
+import { dbUpdate, withinLimit, withinSharedLimit } from "./_db.js";
 
 /**
  * Every collected stake in a match back to its player.
@@ -26,9 +26,10 @@ export async function refundAll(p: EscrowProgram, id: bigint, m: MatchAccount, p
     }
     try {
       // The player's usual account and no other (escrow v4): reopened, the
-      // platform paying, if it was closed; only with the recovery floor and
-      // the fee left over after its rent, so refunds cannot take the platform
-      // below what the rest of cleanup needs (security review, 2026-10-14).
+      // platform paying, if it was closed; only with the usual floor and the
+      // fee left over after its rent (security review, 2026-10-14; outside
+      // review the same day: the recovery floor alone let repeated reopening
+      // take the platform below what everything else needs).
       const conn = p.provider.connection;
       const usual = ata(k);
       const info = await conn.getAccountInfo(usual, "confirmed");
@@ -38,7 +39,15 @@ export async function refundAll(p: EscrowProgram, id: bigint, m: MatchAccount, p
       const missing = !info || onlySol(info);
       if (missing) {
         const rent = await getMinimumBalanceForRentExemptAccount(conn);
-        await requireFeeFunds(conn, payer, RECOVERY_FLOOR_LAMPORTS + rent + 20_000);
+        await requireFeeFunds(conn, payer, 10_000_000 + rent + 20_000);
+        // Only a player who closed their own account with outside tools needs
+        // one made, and closing it again after each refund took the rent from
+        // the platform every time: twice a day per wallet, twenty a day in
+        // all (outside review, 2026-10-14). Past that the refund waits for a
+        // later sweep; the stake stays theirs in the vault meanwhile.
+        if (!(await withinLimit(`refund:make:${k.toBase58()}`, 2, 86400)) || !(await withinSharedLimit("refund:make:all", 20, 86400))) {
+          throw new Error("accounts made for refunds are at today's limit");
+        }
       }
       await p.methods
         .claimRefund(toBn(id), k)

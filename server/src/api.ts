@@ -49,6 +49,10 @@ export interface Env {
   PRIVY_APP_ID?: string;
   /** "require": a pool seat needs a Google sign-in. Unset: counted only. */
   ROOM_GOOGLE?: string;
+  /** "refuse": a hit naming a shot never fired is refused (room.ts whyNoShot). Unset: watched. */
+  NEVER_FIRED?: string;
+  /** Seconds: a kill of the same rat sooner than this after the last scores nothing (room.ts kill). Unset or 0: off. */
+  REPEAT_KILL_SECONDS?: string;
 }
 
 const hex = (buf: ArrayBuffer) =>

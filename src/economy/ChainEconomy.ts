@@ -338,7 +338,12 @@ export class ChainEconomy implements EconomyService {
    * voiding the server's signature, and the server signs nothing it did not
    * build — see api/match/sponsor.ts.
    */
-  private async sponsored(action: "join" | "leave", id: bigint, admit?: { exp: number; sig: string } | null): Promise<string> {
+  private async sponsored(
+    action: "join" | "leave",
+    id: bigint,
+    admit?: { exp: number; sig: string } | null,
+    tier?: PriceTier,
+  ): Promise<string> {
     const r = await post<SponsoredTx>("/api/match/sponsor", {
       id: id.toString(),
       player: this.owner.toBase58(),
@@ -350,6 +355,12 @@ export class ChainEconomy implements EconomyService {
     });
     const tx = Transaction.from(Uint8Array.from(atob(r.tx), (c) => c.charCodeAt(0)));
     checkEscrowTx(tx, { action, id, owner: this.owner, ownerAta: this.ata() });
+    // A join approves whatever entry the match holds when it lands, and names
+    // only the match: read again now, after the server answered, so a match
+    // replaced under the same id while the request was out is refused here
+    // (outside review, 2026-10-14). The escrow upgrade before mainnet puts
+    // the entry in the join itself.
+    if (action === "join" && tier) await this.requireEntry(id, tier);
     return this.send(tx, r);
   }
 
@@ -702,7 +713,9 @@ export class ChainEconomy implements EconomyService {
       throw new Error("The server opened a match at a different entry than this tier");
     }
 
-    await this.sponsored("join", id);
+    // The entry on chain, not the reply's figure, before signing (outside
+    // review, 2026-10-14), as stakeInto does.
+    await this.sponsored("join", id, null, tier);
     this.pending = { id, tier };
   }
 
@@ -764,7 +777,7 @@ export class ChainEconomy implements EconomyService {
     // be able to point a cheap pool's player at a dearer match (review R10).
     await this.requireEntry(id, tier);
     try {
-      await this.sponsored("join", id, admit);
+      await this.sponsored("join", id, admit, tier);
     } catch (e) {
       if ((await this.statusIn(id).catch(() => null)) !== "joined") throw e;
     }

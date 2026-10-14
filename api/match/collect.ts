@@ -140,8 +140,18 @@ export const POST = endpoint(async (body) => {
   if (stakers.length < minimum) {
     await p.methods.cancel(toBn(id)).accountsPartial({ authority: auth }).rpc();
     m = await p.account.match.fetch(matchKey);
-    await refundAll(p, id, m, auth);
-    await closeFinished(p, id, await p.account.match.fetch(matchKey), auth).catch(() => {});
+    // A refund that cannot land yet (an account made for it over the day's
+    // count, say) is the sweep's to finish: the room is still told the match
+    // was cancelled, not a failure it would ask about again (outside review,
+    // 2026-10-14).
+    let refunded = true;
+    try {
+      await refundAll(p, id, m, auth);
+    } catch (e) {
+      refunded = false;
+      console.error("[collect] refunds left to the sweep", { id: id.toString(), error: (e as Error).message });
+    }
+    if (refunded) await closeFinished(p, id, await p.account.match.fetch(matchKey), auth).catch(() => {});
     await dbUpdate("matches", { id: id.toString() }, { state: "cancelled", stakers: stakers.length });
     return {
       started: false,
