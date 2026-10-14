@@ -46,6 +46,10 @@ export const POST = endpoint(async (body, req) => {
   if (units <= 0n) throw new HttpError(400, "Enter an amount");
   // Only the wallet itself can ask: nothing is built or counted for a request
   // in another player's name.
+  // Asks per network before the proof is checked and its one-time number
+  // stored: refused asks used to store one each, unlimited (security review,
+  // round two).
+  if (!await withinLimit(`xfer:ask:ip:${ipKey(req!)}`, 300, 3600)) throw new HttpError(429, "Too many transfers — try again later.");
   await requireWalletProof(body, from, "send", sendDetail(body.to, body.amount));
 
   // Per wallet, per network and overall: a wallet costs nothing to make, so
@@ -54,8 +58,7 @@ export const POST = endpoint(async (body, req) => {
   // 2026-10-12). Sends are rare for a player; these leave room for many.
   if (
     !await withinLimit(`xfer:w:${from.toBase58()}`, 30, 3600) ||
-    !await withinLimit(`xfer:ip:${ipKey(req!)}`, 120, 3600) ||
-    !await withinSharedLimit("xfer:all", 3000, 3600)
+    !await withinLimit(`xfer:ip:${ipKey(req!)}`, 120, 3600)
   ) {
     throw new HttpError(429, "Too many transfers — try again later.");
   }
@@ -103,6 +106,10 @@ export const POST = endpoint(async (body, req) => {
   ) {
     throw new HttpError(429, "Too many new destinations — try again later.");
   }
+  // The overall count last, once the transfer can go through: counted first,
+  // requests from empty wallets used it up for everyone (security review,
+  // 2026-10-14).
+  if (!await withinSharedLimit("xfer:all", 3000, 3600)) throw new HttpError(429, "Too many transfers — try again later.");
   const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash("confirmed");
   const tx = new Transaction({ feePayer: auth.publicKey, blockhash, lastValidBlockHeight });
   // Only when missing: a new account's rent is the platform's, counted above.

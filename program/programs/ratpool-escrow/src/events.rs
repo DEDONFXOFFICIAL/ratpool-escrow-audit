@@ -89,6 +89,9 @@ pub struct MatchSettled {
     pub referrers: Vec<Pubkey>,
     pub referral_amounts: Vec<u64>,
     pub platform_fee: u64,
+    /// For each referrer, the winner whose invite it was (escrow v4; last, so
+    /// a reader of the older receipt still reads everything before it).
+    pub referred: Vec<Pubkey>,
 }
 
 #[event]

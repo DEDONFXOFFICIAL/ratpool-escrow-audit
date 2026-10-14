@@ -68,4 +68,6 @@ pub enum EscrowError {
     BadReferral,
     #[msg("A payout cannot come in the second its match started")]
     TooSoon,
+    #[msg("Prizes and refunds go only to the wallet's usual token account")]
+    NotUsualAccount,
 }

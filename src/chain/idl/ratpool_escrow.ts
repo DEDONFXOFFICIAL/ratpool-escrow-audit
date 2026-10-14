@@ -229,6 +229,10 @@ export type RatpoolEscrow = {
         {
           "name": "id",
           "type": "u64"
+        },
+        {
+          "name": "player",
+          "type": "pubkey"
         }
       ]
     },
@@ -446,6 +450,10 @@ export type RatpoolEscrow = {
         {
           "name": "id",
           "type": "u64"
+        },
+        {
+          "name": "minAfter",
+          "type": "u8"
         }
       ]
     },
@@ -1063,6 +1071,31 @@ export type RatpoolEscrow = {
         {
           "name": "systemProgram",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103,
+                  95,
+                  118,
+                  50
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admission",
+          "signer": true
         }
       ],
       "args": [
@@ -1853,6 +1886,11 @@ export type RatpoolEscrow = {
       "code": 6032,
       "name": "tooSoon",
       "msg": "A payout cannot come in the second its match started"
+    },
+    {
+      "code": 6033,
+      "name": "notUsualAccount",
+      "msg": "Prizes and refunds go only to the wallet's usual token account"
     }
   ],
   "types": [
@@ -2200,6 +2238,16 @@ export type RatpoolEscrow = {
           {
             "name": "platformFee",
             "type": "u64"
+          },
+          {
+            "name": "referred",
+            "docs": [
+              "For each referrer, the winner whose invite it was (escrow v4; last, so",
+              "a reader of the older receipt still reads everything before it)."
+            ],
+            "type": {
+              "vec": "pubkey"
+            }
           }
         ]
       }

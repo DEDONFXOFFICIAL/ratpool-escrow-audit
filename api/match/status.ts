@@ -53,7 +53,10 @@ export const POST = endpoint(async (body) => {
         if (info) {
           const a = unpackAccount(seat.tokenAccount, info);
           approvedHere =
-            a.owner.equals(who) && a.mint.equals(mint()) && !!a.delegate?.equals(matchKey) && a.delegatedAmount >= BigInt(m.entry.toString());
+            a.owner.equals(who) && a.mint.equals(mint()) && !!a.delegate?.equals(matchKey) && a.delegatedAmount >= BigInt(m.entry.toString()) &&
+            // and the entry still there: an approval whose money had been sent
+            // on kept its seat and its pool open (security review, 2026-10-14).
+            a.amount >= BigInt(m.entry.toString()) && !a.isFrozen;
         }
       } catch {
         approvedHere = null;

@@ -51,6 +51,20 @@ pub const SETTLE_DOMAIN: &[u8] = b"ratpool-settle-v1";
 /// Wallets in a signed ranking. The podium is three; the rest stand in for a
 /// ranked wallet the chain did not collect. More would not fit a transaction.
 pub const MAX_SIGNED_RANKING: usize = 6;
+
+/// The associated token account program. A wallet's usual token account for
+/// a mint is the one this program derives for it: the one the app shows and
+/// spends from. Prizes and refunds go there and nowhere else (escrow v4).
+pub const ASSOCIATED_TOKEN_PROGRAM: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+
+/// A wallet's usual token account for a mint (its associated token account).
+pub fn usual_account(wallet: &Pubkey, mint: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[wallet.as_ref(), anchor_spl::token::ID.as_ref(), mint.as_ref()],
+        &ASSOCIATED_TOKEN_PROGRAM,
+    )
+    .0
+}
 pub const MAX_REFUND_DELAY: i64 = 7 * 24 * 3600;
 /// A payout comes at least a second after its start (settle_signed), and
 /// before the refund deadline: one second of delay would leave no second.

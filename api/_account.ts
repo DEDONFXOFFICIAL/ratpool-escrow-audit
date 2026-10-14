@@ -71,6 +71,11 @@ export async function saveAccountState(body: Record<string, unknown>, req: Reque
   if (updated === null) throw new HttpError(502, "the account could not be saved");
   if (updated > 0) return { ok: true };
   // Nothing older to replace: the first save of this account, or a newer one is there.
+  // Which, asked before a new account is counted: a stale save used to count
+  // as a new account and use up the allowance (security review, round two).
+  const there = await dbSelect<{ wallet: string }>(`accounts?wallet=eq.${w}&select=wallet&limit=1`);
+  if (there === null) throw new HttpError(502, "the account could not be saved");
+  if (there.length) throw new HttpError(409, "a newer save exists");
   // A new account is counted apart, per network and overall.
   if (!(await withinLimit(`acct:new:ip:${ipKey(req)}`, 50, 86400)) || !(await withinLimit("acct:new:all", 3000, 86400))) {
     throw new HttpError(429, "Too many new players right now. Try again later.");
@@ -92,8 +97,12 @@ export async function saveAccountState(body: Record<string, unknown>, req: Reque
  *   wallet: <base58>
  *   issued: <ISO time>
  */
-export async function readAccountState(body: Record<string, unknown>): Promise<{ state: unknown; updated_at?: string }> {
+export async function readAccountState(body: Record<string, unknown>, req: Request): Promise<{ state: unknown; updated_at?: string }> {
   if (!DB_ENABLED) throw new HttpError(503, "no database configured");
+  // Counted like saves: a read returns the whole document (up to 64 KB), and
+  // one signed read used to be repeatable without limit for ten minutes
+  // (security review, 2026-10-14). A game reads on sign-in and on start.
+  if (!(await withinLimit(`acct:read:ip:${ipKey(req)}`, 3000, 3600))) throw new HttpError(429, "Too many requests. Try again later.");
   const { message, signature } = body;
   if (typeof message !== "string" || typeof signature !== "string") {
     throw new HttpError(400, "message and signature required");
@@ -111,6 +120,7 @@ export async function readAccountState(body: Record<string, unknown>): Promise<{
     throw new HttpError(400, "signature too old");
   }
   if (!signedBy(wallet, message, signature)) throw new HttpError(401, "signature does not match the wallet");
+  if (!(await withinLimit(`acct:read:w:${wallet.toBase58()}`, 300, 3600))) throw new HttpError(429, "Too many requests. Try again later.");
   const rows = await dbSelect<{ state: unknown; updated_at: string }>(
     `accounts?wallet=eq.${wallet.toBase58()}&select=state,updated_at&limit=1`,
   );

@@ -1,5 +1,6 @@
 import { PublicKey } from "@solana/web3.js";
-import { EventParser } from "@anchor-lang/core";
+import { BorshCoder, EventParser, type Idl } from "@anchor-lang/core";
+import IDL_V3 from "../../src/chain/idl/ratpool_escrow.v3.idl.js";
 import { collectedPlayers, enumKey, guardPda, matchPda, ownedByEscrow, referralPda, toBn, TOKEN_PROGRAM_ID, type EscrowProgram } from "../../src/chain/escrow.js";
 import { requireFeeFunds, preflight, ata, authority, endpoint, entryUnits, HttpError, mint, parseId, parsePubkey, program } from "../_lib.js";
 import { PRICE_TIERS } from "../../src/state/types.js";
@@ -153,11 +154,24 @@ async function sendClose(p: EscrowProgram, id: bigint, feeWallet: PublicKey): Pr
  */
 async function findSettlement(p: EscrowProgram, id: bigint, hint?: string): Promise<(Payout & { unpaired: boolean }) | null> {
   const conn = p.provider.connection;
-  const parser = new EventParser(p.programId, p.coder);
+  // This version's receipts first, then v3's (no referred list): a reader of
+  // one cannot read the other.
+  const parsers = [new EventParser(p.programId, p.coder), new EventParser(p.programId, new BorshCoder(IDL_V3 as unknown as Idl))];
+  const eventsIn = (logs: string[]) => {
+    for (const parser of parsers) {
+      try {
+        const evs = [...parser.parseLogs(logs)];
+        if (evs.some((ev) => ev.name.toLowerCase() === "matchsettled")) return evs;
+      } catch {
+        /* the other version's receipt */
+      }
+    }
+    return [];
+  };
   // One transaction, read for this match's payout (MatchSettled, this id).
   const readOne = async (signature: string): Promise<(Payout & { unpaired: boolean }) | null> => {
     const tx = await conn.getTransaction(signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
-    for (const ev of parser.parseLogs(tx?.meta?.logMessages ?? [])) {
+    for (const ev of eventsIn(tx?.meta?.logMessages ?? [])) {
       // "matchSettled" or "MatchSettled", by which IDL the coder was built from.
       if (ev.name.toLowerCase() !== "matchsettled") continue;
       const d = ev.data as Record<string, unknown>;
@@ -175,7 +189,11 @@ async function findSettlement(p: EscrowProgram, id: bigint, hint?: string): Prom
       // are left unrecorded rather than credited to the wrong friend).
       const referred: Payout["referred"] = [];
       let unpaired = false;
-      if (referrers.length) {
+      // Since v4 the receipt names the winner each referrer was paid for.
+      const named = keys(d.referred);
+      if (referrers.length && named.length === referrers.length) {
+        named.forEach((friend, k) => referred.push({ friend, referrer: referrers[k], amount: referralAmounts[k] ?? 0n }));
+      } else if (referrers.length) {
         const infos = await conn.getMultipleAccountsInfo(winners.map((w) => referralPda(new PublicKey(w))), "confirmed");
         const recorded = winners
           .map((w, i) => {

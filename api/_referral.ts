@@ -1,8 +1,8 @@
 import { randomInt } from "node:crypto";
 import { PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
-import { connection, HttpError, ipKey, parsePubkey, program, signedBy, sponsor } from "./_lib.js";
-import { DB_ENABLED, dbInsertNew, dbPatch, dbSelect, withinLimit } from "./_db.js";
-import { guardPda, ownedByEscrow, referralPda } from "../src/chain/escrow.js";
+import { connection, HttpError, ipKey, parsePubkey, program, requireFeeFunds, signedBy, sponsor } from "./_lib.js";
+import { DB_ENABLED, dbInsertNew, dbPatch, dbSelect, withinLimit, withinSharedLimit } from "./_db.js";
+import { configPda, guardPda, ownedByEscrow, referralPda } from "../src/chain/escrow.js";
 
 /**
  * POST /api/profile with a referral message  →  see below  (routed by
@@ -73,6 +73,11 @@ export async function referralMessage(body: Record<string, unknown>, req?: Reque
   if (!Number.isFinite(issued) || Math.abs(Date.now() - issued) > MAX_AGE_MS) throw new HttpError(400, "signature too old");
   if (!signedBy(wallet, message, signature)) throw new HttpError(401, "signature does not match the wallet");
   const w = wallet.toBase58();
+  // Every ask runs several queries: counted per network and per wallet
+  // (security review, 2026-10-14). The invite screen asks when it opens.
+  if (!(await withinLimit(`ref:ip:${ipKey(req!)}`, 1200, 3600)) || !(await withinLimit(`ref:w:${w}`, 300, 3600))) {
+    throw new HttpError(429, "Too many requests. Try again later.");
+  }
   if (lines[0] === "RatPool referral") return withRecord(w, await myReferral(w, req));
   if (lines[0] === "RatPool referral claim") return withRecord(w, await claim(w, field("code"), req));
   throw new HttpError(400, "not a referral message");
@@ -209,9 +214,25 @@ async function withRecord<T extends object>(
     const [guard, existing] = await conn.getMultipleAccountsInfo([guardPda(), referralPda(player)], "confirmed");
     if (!ownedByEscrow(guard, 8 + 32 + 1) || ownedByEscrow(existing, 8 + 32 + 1)) return answer;
     const payer = sponsor();
+    // The record's rent is the sponsor's: offered only above the fee floor,
+    // and counted overall, where the database alone counts (security review,
+    // 2026-10-14). Not offered now, it is offered on a later ask.
+    await requireFeeFunds(conn, payer.publicKey);
+    // Every offer counted, and at most three a day per wallet, so offers the
+    // game never sends cannot use up the budget (security review, round two).
+    if (!(await withinLimit(`refrecord:day:${w}`, 3, 86400)) || !(await withinSharedLimit("refrecord:all", 500, 86400))) return answer;
     const ix = await program()
       .methods.setReferrer(new PublicKey(referrer))
-      .accountsPartial({ referral: referralPda(player), player, payer: payer.publicKey, systemProgram: SystemProgram.programId })
+      .accountsPartial({
+        referral: referralPda(player),
+        player,
+        payer: payer.publicKey,
+        systemProgram: SystemProgram.programId,
+        // The admission key, which signs only invites the site accepted
+        // (escrow v4): the sponsor holds it, so its one signature covers both.
+        config: configPda(),
+        admission: payer.publicKey,
+      })
       .instruction();
     const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash("confirmed");
     const tx = new Transaction({ feePayer: payer.publicKey, blockhash, lastValidBlockHeight }).add(ix);

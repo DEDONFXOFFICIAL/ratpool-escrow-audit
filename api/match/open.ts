@@ -21,25 +21,6 @@ export const POST = endpoint(async (body) => {
   // not move an opening into a window apart from one that read the same.
   const at = Math.floor(Date.now() / 1000);
   const balance = await requireFeeFunds(connection(), authority().publicKey, 10_000_000 + MATCH_RENT_LAMPORTS);
-  // Openings at the same moment all read the balance before any has paid its
-  // rent, so each passed the check above and together they could take the
-  // platform below what cleanup needs (security review, 2026-10-13). Counted
-  // across every instance: no more openings in two minutes than the balance
-  // covers with the floor left over. Two windows, half a window apart, so
-  // openings under a minute apart (longer than one can take: maxDuration)
-  // always share one, whenever a window turns over. Well above the floor this
-  // is dozens; only near it does it refuse, a little early rather than late.
-  const covers = Math.floor((balance - 10_000_000) / MATCH_RENT_LAMPORTS);
-  // Near the floor (fewer than ten openings left) only the shared count will
-  // do, and none when the database cannot answer; well above it, a database
-  // blip must not stop matches opening, so each instance counts for itself.
-  const count = covers < 10 ? withinSharedLimit : withinLimit;
-  for (const [i, window] of [Math.floor(at / 120), Math.floor((at + 60) / 120)].entries()) {
-    if (!await count(`open:rent:${i}:${window}`, covers, 180)) {
-      console.error("[api] openings would pass the SOL floor", { balance, covers });
-      throw new HttpError(503, "Can't do that right now. Try again in a minute.");
-    }
-  }
   const id = newMatchId();
   const entry = entryUnits(tier);
   // The room names the player it is opening for; a wallet without the entry
@@ -59,6 +40,27 @@ export const POST = endpoint(async (body) => {
     if (!(await withinLimit(`open:w:${parsePubkey(body.wallet).toBase58()}`, 12, 3600))) throw new HttpError(402, "too many pools opened; try again later");
   }
   if (!(await withinLimit("open:all", 600, 3600))) throw new HttpError(503, "Can't open a pool right now. Try again in a minute.");
+  // Openings at the same moment all read the balance before any has paid its
+  // rent, so each passed the check above and together they could take the
+  // platform below what cleanup needs (security review, 2026-10-13). Counted
+  // across every instance: no more openings in two minutes than the balance
+  // covers with the floor left over. Two windows, half a window apart, so
+  // openings under a minute apart (longer than one can take: maxDuration)
+  // always share one, whenever a window turns over. Well above the floor this
+  // is dozens; only near it does it refuse, a little early rather than late.
+  // Counted last, after the wallet's own checks: wallets without the entry
+  // used to use it up (security review, round two).
+  const covers = Math.floor((balance - 10_000_000) / MATCH_RENT_LAMPORTS);
+  // Near the floor (fewer than ten openings left) only the shared count will
+  // do, and none when the database cannot answer; well above it, a database
+  // blip must not stop matches opening, so each instance counts for itself.
+  const count = covers < 10 ? withinSharedLimit : withinLimit;
+  for (const [i, window] of [Math.floor(at / 120), Math.floor((at + 60) / 120)].entries()) {
+    if (!await count(`open:rent:${i}:${window}`, covers, 180)) {
+      console.error("[api] openings would pass the SOL floor", { balance, covers });
+      throw new HttpError(503, "Can't do that right now. Try again in a minute.");
+    }
+  }
   await program()
     .methods.createMatch(toBn(id), toBn(entry))
     .accountsPartial({

@@ -172,11 +172,31 @@ impl World {
         key
     }
 
-    /// A funded player: SOL for fees, `usdc` in a token account.
+    /// `owner`'s usual token account (its associated account), holding `amount`.
+    fn usual_token_account(&mut self, owner: &Pubkey, amount: u64) -> Pubkey {
+        let key = usual_account(owner, &self.mint);
+        let data = pack_token(&self.mint, owner, amount);
+        let lamports = self.svm.minimum_balance_for_rent_exemption(data.len());
+        self.svm
+            .set_account(
+                key,
+                Account {
+                    lamports,
+                    data,
+                    owner: TOKEN_PROGRAM,
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+            .unwrap();
+        key
+    }
+
+    /// A funded player: SOL for fees, `usdc` in their usual token account.
     fn player(&mut self, usdc: u64) -> (Keypair, Pubkey) {
         let kp = Keypair::new();
         self.svm.airdrop(&kp.pubkey(), 1_000_000_000).unwrap();
-        let ata = self.token_account(&kp.pubkey(), usdc);
+        let ata = self.usual_token_account(&kp.pubkey(), usdc);
         (kp, ata)
     }
 
@@ -335,6 +355,8 @@ impl World {
                 player: player.pubkey(),
                 payer: payer.pubkey(),
                 system_program: system_program::ID,
+                config: self.config,
+                admission: payer.pubkey(),
             }
             .to_account_metas(None),
         );
@@ -506,6 +528,11 @@ impl World {
     }
 
     fn collect(&mut self, id: u64, atas: &[Pubkey]) -> Result<(), String> {
+        self.collect_min(id, atas, 0)
+    }
+
+    /// A batch that must leave at least `min_after` stakes collected, or move nothing.
+    fn collect_min(&mut self, id: u64, atas: &[Pubkey], min_after: u8) -> Result<(), String> {
         let mut metas = ratpool_escrow::accounts::Collect {
             config: self.config,
             match_account: self.match_pda(id),
@@ -518,7 +545,7 @@ impl World {
         for a in atas {
             metas.push(AccountMeta::new(*a, false));
         }
-        let ix = self.ix(ratpool_escrow::instruction::Collect { id }.data(), metas);
+        let ix = self.ix(ratpool_escrow::instruction::Collect { id, min_after }.data(), metas);
         let a = self.authority.insecure_clone();
         self.send(ix, &[&a])
     }
@@ -596,9 +623,15 @@ impl World {
         self.settle_as(id, &a, &fee, winners)
     }
 
+    /// A refund into `ata`, naming as the staker the wallet that owns it.
     fn claim_refund(&mut self, id: u64, ata: &Pubkey) -> Result<(), String> {
+        let owner = Pubkey::new_from_array(self.svm.get_account(ata).unwrap().data[32..64].try_into().unwrap());
+        self.claim_refund_for(id, owner, ata)
+    }
+
+    fn claim_refund_for(&mut self, id: u64, player: Pubkey, ata: &Pubkey) -> Result<(), String> {
         let ix = self.ix(
-            ratpool_escrow::instruction::ClaimRefund { id }.data(),
+            ratpool_escrow::instruction::ClaimRefund { id, player }.data(),
             ratpool_escrow::accounts::ClaimRefund {
                 config: self.config,
                 match_account: self.match_pda(id),
@@ -966,7 +999,7 @@ fn only_stakers_can_be_paid_and_only_the_fee_wallet_takes_the_fee() {
     // A winner's key with somebody else's token account.
     let mut swapped = podium.clone();
     swapped[1].1 = podium[2].1;
-    expect_err(w.settle(8, &swapped), "BadPodium");
+    expect_err(w.settle(8, &swapped), "NotUsualAccount");
 
     // The fee steered to a token account the fee wallet does not own.
     let rogue_fee = w.token_account(&stranger.pubkey(), 0);
@@ -1329,9 +1362,9 @@ fn referral_destinations_must_match_owner_and_mint() {
     w.set_referrer(&players[0].0, r.pubkey()).unwrap();
     let a = w.authority.insecure_clone();
     let fee = w.fee_ata;
-    // Paid only to an account the recorded referrer owns.
+    // Paid only to the recorded referrer's usual account.
     expect_err(w.settle_with_referrers_as(28, &a, &fee, &podium,
-        &[players[0].1]), "BadReferral");
+        &[players[0].1]), "NotUsualAccount");
     let mut acc = w.svm.get_account(&ata).unwrap();
     acc.data[..32].copy_from_slice(Pubkey::new_unique().as_ref());
     w.svm.set_account(ata, acc).unwrap();
@@ -1650,10 +1683,14 @@ fn refunds_enforce_owner_and_exactly_one_payment() {
     w.cancel(46).unwrap();
     let (_, rogue_ata) = w.player(0);
     expect_err(w.claim_refund(46, &rogue_ata), "NotAStaker");
+    // Another account of the staker: refused (escrow v4); the usual one, once.
     let alternate = w.token_account(&players[0].0.pubkey(), 0);
-    w.claim_refund(46, &alternate).unwrap();
-    assert_eq!(w.balance(&alternate), ENTRY);
+    expect_err(w.claim_refund(46, &alternate), "NotUsualAccount");
+    let before = w.balance(&players[0].1);
+    w.claim_refund(46, &players[0].1).unwrap();
+    assert_eq!(w.balance(&players[0].1), before + ENTRY);
     expect_err(w.claim_refund(46, &players[0].1), "NotAStaker");
+    assert_eq!(w.balance(&alternate), 0);
     assert_eq!(w.balance(&w.vault_pda(46)), 0);
 }
 
@@ -1688,7 +1725,7 @@ fn wrong_match_and_vault_substitution_are_rejected() {
         mint: w.mint, authority: w.authority.pubkey(), token_program: TOKEN_PROGRAM,
     }.to_account_metas(None);
     metas.push(AccountMeta::new(ata, false));
-    let ix = w.ix(ratpool_escrow::instruction::Collect { id: 48 }.data(), metas);
+    let ix = w.ix(ratpool_escrow::instruction::Collect { id: 48, min_after: 0 }.data(), metas);
     let a = w.authority.insecure_clone();
     expect_err(w.send(ix, &[&a]), "ConstraintSeeds");
     assert_eq!(w.balance(&ata), USDC);
@@ -1715,7 +1752,7 @@ fn non_authority_lifecycle_instructions_are_rejected() {
         mint: w.mint, authority: attacker.pubkey(), token_program: TOKEN_PROGRAM,
     }.to_account_metas(None);
     metas.push(AccountMeta::new(ata, false));
-    let ix = w.ix(ratpool_escrow::instruction::Collect { id: 50 }.data(), metas);
+    let ix = w.ix(ratpool_escrow::instruction::Collect { id: 50, min_after: 0 }.data(), metas);
     expect_err(w.send(ix, &[&attacker]), "ConstraintHasOne");
     for data in [ratpool_escrow::instruction::Start { id: 50 }.data(), ratpool_escrow::instruction::Cancel { id: 50 }.data()] {
         let ix = w.ix(data, w.authority_only(50, &attacker.pubkey()));
@@ -1839,7 +1876,7 @@ fn read_only_source_is_dropped_without_aborting_the_batch() {
     }.to_account_metas(None);
     metas.push(AccountMeta::new_readonly(players[0].1, false));
     metas.push(AccountMeta::new(players[1].1, false));
-    let ix = w.ix(ratpool_escrow::instruction::Collect { id: 56 }.data(), metas);
+    let ix = w.ix(ratpool_escrow::instruction::Collect { id: 56, min_after: 0 }.data(), metas);
     let a = w.authority.insecure_clone();
     w.send(ix, &[&a]).unwrap();
     let m = w.get_match(56).unwrap();
@@ -2014,7 +2051,7 @@ fn a_payout_needs_the_room_servers_signature_on_its_ranking() {
     let mut other = ranking.clone();
     other.swap(0, 2);
     let other_msg = w.settle_message(70, &other);
-    expect_err(w.send_all(&[ed25519_ix(&room, &other_msg), settle.clone()], &[&a]), "BadPodium");
+    expect_err(w.send_all(&[ed25519_ix(&room, &other_msg), settle.clone()], &[&a]), "NotUsualAccount");
     // A signed message that is not a settlement.
     expect_err(w.send_all(&[ed25519_ix(&room, b"hello"), settle.clone()], &[&a]), "BadRoomSignature");
     // The room's signature for another match.
@@ -2052,12 +2089,12 @@ fn the_program_picks_the_podium_from_the_signed_ranking() {
     // Paying the stranger's place to anyone but 8 is refused.
     expect_err(
         w.settle_signed_as(72, &a, &fee, &ranking, &[players[6].1, players[2].1, players[3].1], &[]),
-        "BadPodium",
+        "NotUsualAccount",
     );
     // Podium order matters: 2 first is refused.
     expect_err(
         w.settle_signed_as(72, &a, &fee, &ranking, &[players[2].1, players[6].1, players[8].1], &[]),
-        "BadPodium",
+        "NotUsualAccount",
     );
     w.settle_signed_as(72, &a, &fee, &ranking, &[players[6].1, players[2].1, players[8].1], &[]).unwrap();
     // 10 USDC: 0.50 fee, 9.50 net: 4.75, 2.85, 1.90.
@@ -2110,15 +2147,149 @@ fn a_ranking_holds_one_to_six_distinct_wallets() {
 }
 
 #[test]
-fn a_winner_can_be_paid_into_another_account_of_theirs() {
+fn a_winner_is_paid_only_into_their_usual_account() {
     let mut w = World::new();
     w.initialize(1).unwrap();
     let players = started(&mut w, 73, 1);
+    // Another account of theirs, which the app would not show: refused.
     let spare = w.token_account(&players[0].0.pubkey(), 0);
     let a = w.authority.insecure_clone();
     let fee = w.fee_ata;
-    w.settle_signed_as(73, &a, &fee, &[players[0].0.pubkey()], &[spare], &[]).unwrap();
-    assert_eq!(w.balance(&spare), 950_000);
+    expect_err(w.settle_signed_as(73, &a, &fee, &[players[0].0.pubkey()], &[spare], &[]), "NotUsualAccount");
+    // Their usual account, even handed to someone else: that was their own doing.
+    let usual = players[0].1;
+    let mut acc = w.svm.get_account(&usual).unwrap();
+    acc.data[32..64].copy_from_slice(Pubkey::new_unique().as_ref());
+    w.svm.set_account(usual, acc).unwrap();
+    let before = w.balance(&usual);
+    let winner = players[0].0.pubkey();
+    let msg = w.settle_message(73, &[winner]);
+    let room = w.room.insecure_clone();
+    let ix = w.settle_signed_ix_with(73, &a.pubkey(), &fee, &[usual], &[w.referral_pda(&winner)], &[]);
+    w.send_all(&[ed25519_ix(&room, &msg), ix], &[&a]).unwrap();
+    assert_eq!(w.balance(&usual), before + 950_000);
+    assert_eq!(w.balance(&spare), 0);
+}
+
+#[test]
+fn refunds_go_only_to_the_usual_account() {
+    let mut w = World::new();
+    w.initialize(1).unwrap();
+    let players = started(&mut w, 90, 2);
+    w.advance_clock(REFUND_DELAY);
+    let (kp, usual) = (players[0].0.insecure_clone(), players[0].1);
+    // Another account of the staker, made by a stranger: refused.
+    let other = w.token_account(&kp.pubkey(), 0);
+    expect_err(w.claim_refund_for(90, kp.pubkey(), &other), "NotUsualAccount");
+    // Naming the staker cannot send it to another player's usual account.
+    expect_err(w.claim_refund_for(90, kp.pubkey(), &players[1].1), "NotUsualAccount");
+    let before = w.balance(&usual);
+    w.claim_refund_for(90, kp.pubkey(), &usual).unwrap();
+    assert_eq!(w.balance(&usual), before + USDC);
+    assert_eq!(w.balance(&other), 0);
+    // Once.
+    expect_err(w.claim_refund_for(90, kp.pubkey(), &usual), "NotAStaker");
+}
+
+#[test]
+fn a_usual_account_handed_to_someone_else_still_takes_the_refund() {
+    let mut w = World::new();
+    w.initialize(1).unwrap();
+    let players = started(&mut w, 91, 1);
+    w.advance_clock(REFUND_DELAY);
+    let (kp, usual) = (players[0].0.insecure_clone(), players[0].1);
+    let mut acc = w.svm.get_account(&usual).unwrap();
+    acc.data[32..64].copy_from_slice(Pubkey::new_unique().as_ref());
+    w.svm.set_account(usual, acc).unwrap();
+    let before = w.balance(&usual);
+    w.claim_refund_for(91, kp.pubkey(), &usual).unwrap();
+    assert_eq!(w.balance(&usual), before + USDC);
+}
+
+#[test]
+fn an_invite_record_needs_the_platforms_admission_signature() {
+    let mut w = World::new();
+    w.initialize(1).unwrap();
+    let (player, _) = w.player(0);
+    let (referrer, _) = w.player(0);
+    let stranger = Keypair::new();
+    w.svm.airdrop(&stranger.pubkey(), 1_000_000_000).unwrap();
+    let metas = |w: &World, admission: Pubkey| {
+        ratpool_escrow::accounts::SetReferrer {
+            referral: w.referral_pda(&player.pubkey()),
+            player: player.pubkey(),
+            payer: stranger.pubkey(),
+            system_program: system_program::ID,
+            config: w.config,
+            admission,
+        }
+        .to_account_metas(None)
+    };
+    let data = ratpool_escrow::instruction::SetReferrer { referrer: referrer.pubkey() }.data();
+    // Signed by a key that is not the platform admission key: refused.
+    let ix = w.ix(data.clone(), metas(&w, stranger.pubkey()));
+    expect_err(w.send(ix, &[&stranger, &player]), "WrongAdmission");
+    // The admission key named, but not signing: refused.
+    let admission = w.admission.pubkey();
+    let mut m = metas(&w, admission);
+    m.iter_mut().find(|a| a.pubkey == admission).unwrap().is_signer = false;
+    let ix = w.ix(data, m);
+    expect_err(w.send(ix, &[&stranger, &player]), "AccountNotSigner");
+    // With the platform signature, the record is written.
+    w.set_referrer(&player, referrer.pubkey()).unwrap();
+    w.expect_event(ratpool_escrow::events::ReferralRecorded { player: player.pubkey(), referrer: referrer.pubkey(), by_player: true });
+}
+
+#[test]
+fn a_last_batch_short_of_the_minimum_moves_nothing() {
+    let mut w = World::new();
+    w.initialize(6).unwrap();
+    w.create_match(92, USDC).unwrap();
+    let players = w.room(92, 6);
+    let atas: Vec<Pubkey> = players.iter().map(|(_, a)| *a).collect();
+    // One player's money is gone between the site check and the collection.
+    w.set_balance(&atas[5], 0);
+    let before: Vec<u64> = atas.iter().map(|a| w.balance(a)).collect();
+    expect_err(w.collect_min(92, &atas, 6), "TooFewPlayers");
+    let after: Vec<u64> = atas.iter().map(|a| w.balance(a)).collect();
+    assert_eq!(before, after, "nothing moved");
+    // The pool fills again; with the minimum met, the batch goes through.
+    let (_, sixth) = w.room(92, 1).pop().unwrap();
+    let mut ok = atas[..5].to_vec();
+    ok.push(sixth);
+    w.collect_min(92, &ok, 6).unwrap();
+    w.start(92).unwrap();
+}
+
+#[test]
+fn the_receipt_names_each_referrers_winner() {
+    let mut w = World::new();
+    w.initialize(1).unwrap();
+    let players = started(&mut w, 93, 6);
+    let (r, r_usual) = w.player(0);
+    w.set_referrer(&players[1].0, r.pubkey()).unwrap();
+    let ranking: Vec<Pubkey> = players[..3].iter().map(|(k, _)| k.pubkey()).collect();
+    let pay: Vec<Pubkey> = players[..3].iter().map(|(_, a)| *a).collect();
+    let a = w.authority.insecure_clone();
+    let fee = w.fee_ata;
+    w.settle_signed_as(93, &a, &fee, &ranking, &pay, &[r_usual]).unwrap();
+    let pool = 6 * USDC;
+    let fee_total = pool * FEE_BPS as u64 / 10_000;
+    let net = pool - fee_total;
+    let second = net * 30 / 100;
+    let third = net * 20 / 100;
+    let referral = pool / 100;
+    w.expect_event(ratpool_escrow::events::MatchSettled {
+        id: 93,
+        pool,
+        fee: fee_total,
+        winners: ranking.clone(),
+        amounts: vec![net - second - third, second, third],
+        referrers: vec![r.pubkey()],
+        referral_amounts: vec![referral],
+        platform_fee: fee_total - referral,
+        referred: vec![players[1].0.pubkey()],
+    });
 }
 
 #[test]
@@ -2141,6 +2312,8 @@ fn referrals_are_the_winners_own_records() {
             player: players[1].0.pubkey(),
             payer: payer.pubkey(),
             system_program: system_program::ID,
+            config: w.config,
+            admission: payer.pubkey(),
         }
         .to_account_metas(None);
         metas.iter_mut().find(|m| m.pubkey == players[1].0.pubkey()).unwrap().is_signer = false;
@@ -2178,7 +2351,7 @@ fn referrals_are_the_winners_own_records() {
     // A record left out, to shift the shares: every one must be paid.
     expect_err(with_slots(&mut w, &[s0, s1, s2], &[r0_ata]), "BadReferral");
     // A winner's record paid to somebody else.
-    expect_err(with_slots(&mut w, &[s0, s1, s2], &[r3_ata, r1_ata]), "BadReferral");
+    expect_err(with_slots(&mut w, &[s0, s1, s2], &[r3_ata, r1_ata]), "NotUsualAccount");
     assert_eq!(w.balance(&w.vault_pda(76)), 6 * USDC);
 
     // Both records: 1% of 6 USDC split between them, out of the 5%.
@@ -2333,7 +2506,7 @@ fn the_room_servers_own_bytes_are_accepted() {
     for n in 1..=3u8 {
         let kp = Keypair::new_from_array([n; 32]);
         w.svm.airdrop(&kp.pubkey(), 1_000_000_000).unwrap();
-        let ata = w.token_account(&kp.pubkey(), 5 * USDC);
+        let ata = w.usual_token_account(&kp.pubkey(), 5 * USDC);
         w.join(90, &kp, &ata).unwrap();
         players.push((kp, ata));
     }

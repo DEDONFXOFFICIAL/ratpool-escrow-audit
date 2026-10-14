@@ -53,8 +53,9 @@ export const POST = endpoint(async (body) => {
   }
 
   const entry = BigInt(m.entry.toString());
+  const canPay = async () => {
   const infos = joined.length ? await p.provider.connection.getMultipleAccountsInfo(joined.map((j) => j.account), "confirmed") : [];
-  const payable = joined.filter(({ key: k, account }, i) => {
+  return joined.filter(({ key: k, account }, i) => {
     const info = infos[i];
     if (!info) return false;
     try {
@@ -75,14 +76,19 @@ export const POST = endpoint(async (body) => {
       return false;
     }
   });
+  };
+  const payable = await canPay();
+  // Every seat the room named that cannot pay, approval gone included.
+  const named = Array.isArray(body.wallets) ? body.wallets.map((w) => parsePubkey(w).toBase58()) : joined.map((j) => j.key.toBase58());
+  const shortOf = (can: typeof payable) => {
+    const ok = new Set(can.map((j) => j.key.toBase58()));
+    return named.filter((w) => !ok.has(w));
+  };
   // Stakes an earlier run already moved (it was cut off between batches)
   // count towards the minimum. Only when nothing has moved at all may the
   // room be told so; otherwise the shortfall is cancelled and refunded below.
   const already = collectedPlayers(m).length;
   if (already === 0 && payable.length < minimum) {
-    const ok = new Set(payable.map((j) => j.key.toBase58()));
-    // Every seat the room named that cannot pay, approval gone included.
-    const named = Array.isArray(body.wallets) ? body.wallets.map((w) => parsePubkey(w).toBase58()) : joined.map((j) => j.key.toBase58());
     return {
       started: false,
       collected: 0,
@@ -90,18 +96,41 @@ export const POST = endpoint(async (body) => {
       pool: 0,
       reason: "TooFewPlayers",
       moved: false,
-      short: named.filter((w) => !ok.has(w)),
+      short: shortOf(payable),
     };
   }
 
   for (let i = 0; already + payable.length >= minimum && i < payable.length; i += BATCH) {
     const batch = payable.slice(i, i + BATCH);
-    await p.methods
-      .collect(toBn(id))
-      .accountsPartial({ mint: mint(), authority: auth, tokenProgram: TOKEN_PROGRAM_ID })
-      .remainingAccounts(batch.map((j) => ({ pubkey: j.account, isSigner: false, isWritable: true })))
-      .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })])
-      .rpc();
+    // The last batch asks the program for the room's minimum once it is
+    // done, or nothing in it moves (escrow v4; earlier versions ignore it). A
+    // player withdrawing between the check above and this used to leave the
+    // pool short and the match cancelled (security review, 2026-10-14).
+    const last = i + BATCH >= payable.length;
+    try {
+      await p.methods
+        .collect(toBn(id), last ? Math.min(minimum, 255) : 0)
+        .accountsPartial({ mint: mint(), authority: auth, tokenProgram: TOKEN_PROGRAM_ID })
+        .remainingAccounts(batch.map((j) => ({ pubkey: j.account, isSigner: false, isWritable: true })))
+        .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })])
+        .rpc();
+    } catch (e) {
+      if (!last || !/TooFewPlayers/.test(String((e as Error)?.message ?? e) + JSON.stringify((e as { logs?: unknown })?.logs ?? ""))) throw e;
+      // Nothing of this batch moved. With nothing moved before it either, the
+      // room is told who cannot pay now and fills the pool again; otherwise
+      // the shortfall is cancelled and refunded below, as before.
+      if (already === 0 && i === 0) {
+        return {
+          started: false,
+          collected: 0,
+          dropped: 0,
+          pool: 0,
+          reason: "TooFewPlayers",
+          moved: false,
+          short: shortOf(await canPay()),
+        };
+      }
+    }
   }
 
   m = await p.account.match.fetch(matchKey);

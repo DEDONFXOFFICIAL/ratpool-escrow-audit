@@ -35,6 +35,9 @@ export const POST = endpoint(async (body, req) => {
   // naming a full wallet used to spend its claims and the network's for
   // nothing (review 2026-10-06).
   const before = await getAccount(connection(), ata(wallet)).catch(() => null);
+  // An account that cannot take the claim (handed over, frozen) is refused
+  // before any allowance is counted (security review, round two).
+  if (before && (!before.owner.equals(wallet) || before.isFrozen)) throw new HttpError(400, "This wallet's USDC account can't take a claim.");
   if (before && Number(before.amount) / 10 ** USDC_DECIMALS >= REFILL_BELOW) {
     throw new HttpError(429, `You still have ${(Number(before.amount) / 10 ** USDC_DECIMALS).toFixed(2)} test USDC — stake some first`);
   }
@@ -42,12 +45,13 @@ export const POST = endpoint(async (body, req) => {
     !await withinLimit(`faucet:w:${key}`, 1, 600)
     || !await withinLimit(`faucet:wd:${key}`, 6, 86400)
     || !await withinLimit(`faucet:ip:${ipKey(req!)}`, 10, 3600)
-    || !await withinSharedLimit("faucet:all", 400, 86400)
   ) {
     throw new HttpError(429, "Too many claims — try again later.");
   }
   const conn = connection();
   await requireFeeFunds(conn, authority().publicKey);
+  // The overall count last, once the claim can be paid.
+  if (!await withinSharedLimit("faucet:all", 400, 86400)) throw new HttpError(429, "Too many claims — try again later.");
   const m = mint();
 
   // The authority pays the rent for a first-time token account; the faucet

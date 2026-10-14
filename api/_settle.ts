@@ -1,20 +1,5 @@
-import {
-  Ed25519Program,
-  Keypair,
-  PublicKey,
-  SystemProgram,
-  SYSVAR_INSTRUCTIONS_PUBKEY,
-  Transaction,
-  TransactionInstruction,
-} from "@solana/web3.js";
-import {
-  ACCOUNT_SIZE,
-  createAssociatedTokenAccountIdempotentInstruction,
-  createInitializeAccount3Instruction,
-  getAssociatedTokenAddressSync,
-  getMinimumBalanceForRentExemptAccount,
-  unpackAccount,
-} from "@solana/spl-token";
+import { Ed25519Program, PublicKey, SYSVAR_INSTRUCTIONS_PUBKEY, Transaction, TransactionInstruction } from "@solana/web3.js";
+import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import {
   enumKey,
   guardPda,
@@ -27,6 +12,7 @@ import {
   type MatchAccount,
 } from "../src/chain/escrow.js";
 import { ata, authority, HttpError, mint, onlySol, ROOM_KEY, signedBytesByRoom } from "./_lib.js";
+import { withinLimit } from "./_db.js";
 
 /** Mirrors the program: podium shares in percent, best first. */
 const PODIUM_SHARES = [50n, 30n, 20n];
@@ -107,12 +93,13 @@ export async function paySigned(p: EscrowProgram, id: bigint, m: MatchAccount, s
     }
   });
 
-  // Where each payment lands: the owner's usual account, made if missing;
-  // if it cannot take USDC (handed over, frozen), a new account of theirs,
-  // because the program pays every place and every record, skipping none.
+  // Where each payment lands: the owner's usual account, and no other
+  // (escrow v4), reopened, the platform paying, if it was closed. A usual
+  // account its owner has handed to someone else is still paid: that was
+  // their own doing. A second account made for them when the usual one could
+  // not take USDC put money where the app does not show it (security review,
+  // 2026-10-14).
   const creates: TransactionInstruction[] = [];
-  const spares: { ixs: TransactionInstruction[]; key: Keypair }[] = [];
-  const rent = await getMinimumBalanceForRentExemptAccount(conn);
   const destination = async (owner: PublicKey): Promise<PublicKey> => {
     // Off-curve owners allowed: a referrer can be any address the program
     // accepted, a program address included, and refusing to derive its
@@ -120,26 +107,8 @@ export async function paySigned(p: EscrowProgram, id: bigint, m: MatchAccount, s
     // 2026-10-12). For a wallet it is the same account as ata().
     const usual = getAssociatedTokenAddressSync(mint(), owner, true, TOKEN_PROGRAM_ID);
     const info = await conn.getAccountInfo(usual, "confirmed");
-    if (!info || onlySol(info)) {
-      creates.push(createAssociatedTokenAccountIdempotentInstruction(auth.publicKey, usual, owner, mint(), TOKEN_PROGRAM_ID));
-      return usual;
-    }
-    try {
-      const a = unpackAccount(usual, info);
-      if (a.owner.equals(owner) && a.mint.equals(mint()) && !a.isFrozen) return usual;
-    } catch {
-      /* not a token account: a new one below */
-    }
-    const key = Keypair.generate();
-    spares.push({
-      key,
-      ixs: [
-        SystemProgram.createAccount({ fromPubkey: auth.publicKey, newAccountPubkey: key.publicKey, lamports: rent, space: ACCOUNT_SIZE, programId: TOKEN_PROGRAM_ID }),
-        createInitializeAccount3Instruction(key.publicKey, mint(), owner, TOKEN_PROGRAM_ID),
-      ],
-    });
-    console.warn("[settle] paying into a new account: the usual one cannot take USDC", { owner: owner.toBase58() });
-    return key.publicKey;
+    if (!info || onlySol(info)) creates.push(createAssociatedTokenAccountIdempotentInstruction(auth.publicKey, usual, owner, mint(), TOKEN_PROGRAM_ID));
+    return usual;
   };
   const payTo: PublicKey[] = [];
   for (const w of winners) payTo.push(await destination(w));
@@ -147,10 +116,16 @@ export async function paySigned(p: EscrowProgram, id: bigint, m: MatchAccount, s
   for (const r of records) referTo.push(await destination(r.referrer));
   // The fee wallet's account, pinned in the match.
   creates.push(createAssociatedTokenAccountIdempotentInstruction(auth.publicKey, ata(m.feeWallet), m.feeWallet, mint(), TOKEN_PROGRAM_ID));
+  // Accounts this payout makes at the platform's expense: an honest payout
+  // makes each at most once, so attempts that have to make some are counted
+  // per match (security review, 2026-10-14). Past three, the match waits for
+  // its refund deadline instead.
+  if (creates.length > 1 && !(await withinLimit(`settle:make:${id}`, 3, 86400))) {
+    throw new HttpError(503, "This payout keeps needing new accounts; it waits for the refund.");
+  }
   // Made first, in their own transactions: with them the payout would not
   // fit one.
   if (creates.length) await p.provider.sendAndConfirm!(new Transaction().add(...creates));
-  for (const spare of spares) await p.provider.sendAndConfirm!(new Transaction().add(...spare.ixs), [spare.key]);
 
   // The room's signature, checked by the precompile straight before the payout.
   const check = Ed25519Program.createInstructionWithPublicKey({ publicKey: ROOM_KEY.toBytes(), message: msg, signature: sig });

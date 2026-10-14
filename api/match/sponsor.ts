@@ -1,4 +1,5 @@
 import { Transaction } from "@solana/web3.js";
+import { getAccount } from "@solana/spl-token";
 import { withinLimit } from "../_db.js";
 import { enumKey, matchPda, toBn, TOKEN_PROGRAM_ID } from "../../src/chain/escrow.js";
 import { requireFeeFunds, preflight, admitted, ata, connection, endpoint, HttpError, ipKey, parseId, parsePubkey, program, requireOutsideWallet, requireWalletProof, sponsor } from "../_lib.js";
@@ -42,6 +43,10 @@ export const POST = endpoint(async (body, req) => {
   // any limit is counted: naming someone else's wallet used to spend that
   // player's allowance and lock them out of pools (review R16).
   if (action === "leave") {
+    // Counted per network before the signature is checked and its one-time
+    // number stored, and before the chain is read (security review, round
+    // two). Per network only: nothing here can spend a player's own allowance.
+    if (!await withinLimit(`sponsor:ipleave:${ipKey(req!)}`, 600, 3600)) throw new HttpError(429, "Too many requests — try again later.");
     // Asked for by the wallet itself, never in its name (review 2026-10-06).
     await requireWalletProof(body, player, "leave", leaveDetail(id));
     const m = await program().account.match.fetchNullable(matchPda(id));
@@ -53,12 +58,12 @@ export const POST = endpoint(async (body, req) => {
   // room's ticket. A leave can be sent by nobody but that player, so it costs
   // the platform nothing until they do; counting it let anyone use up a
   // seated player's allowance by asking for leaves in their name (R16).
-  // Leaves count on a separate, larger network allowance: on a shared
-  // network (a mobile carrier puts many players behind one address) a flood
-  // of leave requests must not use up the allowance that joins depend on.
+  // Leaves count on a separate, larger network allowance (above): on a
+  // shared network (a mobile carrier puts many players behind one address) a
+  // flood of leave requests must not use up the allowance joins depend on.
   if (
-    (action === "join" && !await withinLimit(`sponsor:w:${player.toBase58()}`, 60, 3600))
-    || !await withinLimit(`sponsor:${action === "join" ? "ip" : "ipleave"}:${ipKey(req!)}`, action === "join" ? 200 : 600, 3600)
+    action === "join" &&
+    (!await withinLimit(`sponsor:w:${player.toBase58()}`, 60, 3600) || !await withinLimit(`sponsor:ip:${ipKey(req!)}`, 200, 3600))
   ) {
     throw new HttpError(429, "Too many requests — try again later.");
   }
@@ -67,6 +72,21 @@ export const POST = endpoint(async (body, req) => {
   const payer = sponsor();
   await requireFeeFunds(conn, payer.publicKey);
   const p = program();
+  // A join only when it can land: an open match without this wallet in it,
+  // and the entry in the wallet's own usable account. A join that fails on
+  // chain still costs the sponsor its fee, and wallets without the entry
+  // made that free to repeat (security review, 2026-10-14). Then counted
+  // overall, once it can go through.
+  if (action === "join") {
+    const m = await p.account.match.fetchNullable(matchPda(id));
+    if (!m || enumKey(m.state) !== "open") throw new HttpError(409, "This pool is no longer open.");
+    if (m.players.some((pl) => pl.key.equals(player) && enumKey(pl.status) === "joined")) throw new HttpError(409, "Already in this pool.");
+    const src = await getAccount(conn, ata(player)).catch(() => null);
+    if (!src || !src.owner.equals(player) || src.isFrozen || src.amount < BigInt(m.entry.toString())) {
+      throw new HttpError(400, "Not enough USDC in this wallet for the entry.");
+    }
+    if (!await withinLimit("sponsor:all", 6000, 3600)) throw new HttpError(429, "Too many requests — try again later.");
+  }
   const accounts = { playerAta: ata(player), player, tokenProgram: TOKEN_PROGRAM_ID };
   const ix =
     action === "join"

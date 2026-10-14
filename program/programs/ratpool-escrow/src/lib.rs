@@ -98,8 +98,9 @@ pub mod ratpool_escrow {
     pub fn collect<'info>(
         ctx: Context<'info, Collect<'info>>,
         id: u64,
+        min_after: u8,
     ) -> Result<()> {
-        instructions::collect::handle_collect(ctx, id)
+        instructions::collect::handle_collect(ctx, id, min_after)
     }
 
     pub fn start(ctx: Context<AuthorityOnly>, id: u64) -> Result<()> {
@@ -126,8 +127,8 @@ pub mod ratpool_escrow {
         instructions::referral::handle_set_referrer(ctx, referrer)
     }
 
-    pub fn claim_refund(ctx: Context<ClaimRefund>, id: u64) -> Result<()> {
-        instructions::claim_refund::handle_claim_refund(ctx, id)
+    pub fn claim_refund(ctx: Context<ClaimRefund>, id: u64, player: Pubkey) -> Result<()> {
+        instructions::claim_refund::handle_claim_refund(ctx, id, player)
     }
 
     pub fn close_match(ctx: Context<CloseMatch>, id: u64) -> Result<()> {

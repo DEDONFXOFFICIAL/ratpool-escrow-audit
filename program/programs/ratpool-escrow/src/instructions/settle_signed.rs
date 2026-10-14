@@ -54,12 +54,13 @@ pub struct SettleSigned<'info> {
 /// holding too few is refused, never topped up from wallets the room did not
 /// rank. The payout key chooses nothing.
 ///
-/// Remaining accounts: one token account for each place, owned by that
-/// winner (any of theirs: a winner whose usual account is unusable can be
-/// paid into another); then each winner's invite record address, in podium
-/// order, whether or not the record exists; then, for each record that
-/// exists, a token account owned by its referrer. Every record is counted
-/// and paid: none can be left out, invented or redirected.
+/// Remaining accounts: each place's winner's usual token account; then each
+/// winner's invite record address, in podium order, whether or not the record
+/// exists; then, for each record that exists, its referrer's usual token
+/// account. Only usual accounts, the ones the app shows (escrow v4): any
+/// account a winner owned used to do. Every record is counted and paid: none
+/// can be left out, invented or redirected. The receipt names, for each
+/// referrer, the winner whose invite it was.
 pub fn handle_settle_signed<'info>(ctx: Context<'info, SettleSigned<'info>>, id: u64) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     require!(
@@ -107,22 +108,25 @@ pub fn handle_settle_signed<'info>(ctx: Context<'info, SettleSigned<'info>>, id:
 
     let rem = ctx.remaining_accounts;
     require!(rem.len() >= 2 * n, EscrowError::BadReferral);
-    // Each place's account first: the winner's own, of this mint.
+    // Each place's account first: the winner's usual account of this mint.
+    let mint_key = ctx.accounts.mint.key();
     for i in 0..n {
+        require!(rem[i].key() == usual_account(&winners[i], &mint_key), EscrowError::NotUsualAccount);
         let ta = Account::<TokenAccount>::try_from(&rem[i])?;
-        require!(ta.mint == ctx.accounts.mint.key(), EscrowError::WrongMint);
-        require!(ta.owner == winners[i], EscrowError::BadPodium);
+        require!(ta.mint == mint_key, EscrowError::WrongMint);
     }
 
     // Every winner's invite record, at its own address: the program sees
     // which exist, so none can be left out to shift the shares.
     let mut referrers: Vec<Pubkey> = Vec::with_capacity(n);
+    let mut referred: Vec<Pubkey> = Vec::with_capacity(n);
     for (i, w) in winners.iter().enumerate() {
         let rec = &rem[n + i];
         let (address, _) = Pubkey::find_program_address(&[REFERRAL_SEED, w.as_ref()], ctx.program_id);
         require!(rec.key() == address, EscrowError::BadReferral);
         if rec.owner == ctx.program_id && !rec.data_is_empty() {
             referrers.push(Account::<Referral>::try_from(rec)?.referrer);
+            referred.push(*w);
         }
     }
     let k = referrers.len();
@@ -171,7 +175,6 @@ pub fn handle_settle_signed<'info>(ctx: Context<'info, SettleSigned<'info>>, id:
     let match_info = ctx.accounts.match_account.to_account_info();
     let vault_info = ctx.accounts.vault.to_account_info();
     let mint_info = ctx.accounts.mint.to_account_info();
-    let mint_key = ctx.accounts.mint.key();
     let decimals = ctx.accounts.mint.decimals;
 
     let pay = |to: &AccountInfo<'info>, amount: u64| -> Result<()> {
@@ -197,16 +200,13 @@ pub fn handle_settle_signed<'info>(ctx: Context<'info, SettleSigned<'info>>, id:
     pay(&ctx.accounts.fee_ata.to_account_info(), platform_fee)?;
     for i in 0..n {
         let acc = &rem[i];
-        let ta = Account::<TokenAccount>::try_from(acc)?;
-        require!(ta.mint == mint_key, EscrowError::WrongMint);
-        require!(ta.owner == winners[i], EscrowError::BadPodium);
         pay(acc, amounts[i])?;
     }
     for j in 0..k {
         let acc = &rem[2 * n + j];
+        require!(acc.key() == usual_account(&referrers[j], &mint_key), EscrowError::NotUsualAccount);
         let ta = Account::<TokenAccount>::try_from(acc)?;
         require!(ta.mint == mint_key, EscrowError::WrongMint);
-        require!(ta.owner == referrers[j], EscrowError::BadReferral);
         pay(acc, referral_each)?;
     }
 
@@ -226,7 +226,8 @@ pub fn handle_settle_signed<'info>(ctx: Context<'info, SettleSigned<'info>>, id:
         amounts,
         referrers,
         referral_amounts,
-        platform_fee
+        platform_fee,
+        referred
     });
     Ok(())
 }

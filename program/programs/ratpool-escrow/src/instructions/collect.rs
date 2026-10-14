@@ -39,9 +39,16 @@ pub struct Collect<'info> {
 /// check-then-transfer rather than try-then-catch: a failed CPI aborts the
 /// whole transaction, and one empty wallet must not stop thirty-nine full
 /// ones.
+///
+/// `min_after`: the collected stakes there must be once this batch is done,
+/// or the whole batch is undone. The last batch asks for the room's minimum:
+/// a player withdrawing their approval between the site's check and the
+/// collection used to leave too few, and the match was cancelled; now
+/// nothing moves and the pool is filled again (escrow v4).
 pub fn handle_collect<'info>(
     ctx: Context<'info, Collect<'info>>,
     id: u64,
+    min_after: u8,
 ) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     require!(
@@ -123,6 +130,10 @@ pub fn handle_collect<'info>(
         m.pool = m.pool.checked_add(entry).ok_or(EscrowError::Overflow)?;
         collected += 1;
     }
+    require!(
+        ctx.accounts.match_account.collected_count() >= min_after as usize,
+        EscrowError::TooFewPlayers
+    );
     emit!(StakesCollected {
         id,
         collected,

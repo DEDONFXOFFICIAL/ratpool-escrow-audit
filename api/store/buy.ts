@@ -67,6 +67,9 @@ export const POST = endpoint(async (body, req) => {
   if (units <= 0n) throw new HttpError(400, "Nothing to pay");
   // Only the wallet itself can ask (recording a payment that already landed,
   // above, needs no proof: the chain is the proof).
+  // Asks per network before the proof is checked and its one-time number
+  // stored (security review, round two).
+  if (!await withinLimit(`store:ask:ip:${ipKey(req!)}`, 300, 3600)) throw new HttpError(429, "Too many purchases — try again later.");
   await requireWalletProof(body, from, "buy", buyDetail(item, body.amount));
   // Paid for already (on another phone, say): nothing is built or charged,
   // and the game unlocks it (review 2026-10-07).
@@ -81,8 +84,7 @@ export const POST = endpoint(async (body, req) => {
   // Per wallet, per network and overall: the platform pays each payment's fee.
   if (
     !await withinLimit(`store:w:${from.toBase58()}`, 30, 3600) ||
-    !await withinLimit(`store:ip:${ipKey(req!)}`, 120, 3600) ||
-    !await withinSharedLimit("store:all", 2000, 3600)
+    !await withinLimit(`store:ip:${ipKey(req!)}`, 120, 3600)
   ) {
     throw new HttpError(429, "Too many purchases — try again later.");
   }
@@ -106,6 +108,10 @@ export const POST = endpoint(async (body, req) => {
     );
   }
 
+  // The overall count last, once the payment can go through: counted first,
+  // requests from empty wallets used it up for everyone (security review,
+  // 2026-10-14).
+  if (!await withinSharedLimit("store:all", 2000, 3600)) throw new HttpError(429, "Too many purchases — try again later.");
   const destination = ata(treasury);
   const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash("confirmed");
   const tx = new Transaction({ feePayer: auth.publicKey, blockhash, lastValidBlockHeight })

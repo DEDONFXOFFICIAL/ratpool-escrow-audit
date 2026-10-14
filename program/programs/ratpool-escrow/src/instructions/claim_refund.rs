@@ -8,10 +8,12 @@ use crate::{
     state::{Config, Match, MatchState, PlayerStatus},
 };
 
-/// No signer beyond the fee payer: a refund is owed, not requested, and the
-/// token account's owner says who it goes to.
+/// No signer beyond the fee payer: a refund is owed, not requested. The
+/// staker is named, and the refund goes to their usual token account and
+/// nowhere else: any account they owned used to do, so a stranger could send
+/// it to one the app does not show (escrow v4, security review 2026-10-13).
 #[derive(Accounts)]
-#[instruction(id: u64)]
+#[instruction(id: u64, player: Pubkey)]
 pub struct ClaimRefund<'info> {
     #[account(seeds = [CONFIG_SEED], bump = config.bump, has_one = mint)]
     pub config: Account<'info, Config>,
@@ -26,16 +28,20 @@ pub struct ClaimRefund<'info> {
     )]
     pub vault: Account<'info, TokenAccount>,
     pub mint: Account<'info, Mint>,
-    #[account(mut, token::mint = mint)]
+    #[account(
+        mut,
+        token::mint = mint,
+        address = usual_account(&player, &mint.key()) @ EscrowError::NotUsualAccount
+    )]
     pub player_ata: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,
 }
 
 /// The fire exit. Anyone may call it, for any staker, once the match is
 /// cancelled or the settle deadline has passed. Returns exactly the entry.
-pub fn handle_claim_refund(ctx: Context<ClaimRefund>, id: u64) -> Result<()> {
+pub fn handle_claim_refund(ctx: Context<ClaimRefund>, id: u64, player: Pubkey) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
-    let owner = ctx.accounts.player_ata.owner;
+    let owner = player;
     let idx = {
         let m = &ctx.accounts.match_account;
         let open = match m.state {

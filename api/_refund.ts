@@ -1,8 +1,8 @@
 import type { PublicKey } from "@solana/web3.js";
-import { createAssociatedTokenAccountIdempotentInstruction } from "@solana/spl-token";
+import { createAssociatedTokenAccountIdempotentInstruction, getMinimumBalanceForRentExemptAccount } from "@solana/spl-token";
 import bs58 from "bs58";
 import { collectedPlayers, enumKey, IDL, PROGRAM_ID, toBn, TOKEN_PROGRAM_ID, type EscrowProgram, type MatchAccount } from "../src/chain/escrow.js";
-import { ata, mint } from "./_lib.js";
+import { ata, mint, onlySol, RECOVERY_FLOOR_LAMPORTS, requireFeeFunds } from "./_lib.js";
 import { dbUpdate } from "./_db.js";
 
 /**
@@ -25,10 +25,25 @@ export async function refundAll(p: EscrowProgram, id: bigint, m: MatchAccount, p
       continue;
     }
     try {
+      // The player's usual account and no other (escrow v4): reopened, the
+      // platform paying, if it was closed; only with the recovery floor and
+      // the fee left over after its rent, so refunds cannot take the platform
+      // below what the rest of cleanup needs (security review, 2026-10-14).
+      const conn = p.provider.connection;
+      const usual = ata(k);
+      const info = await conn.getAccountInfo(usual, "confirmed");
+      // Made only when missing: the make-if-missing step refuses an existing
+      // account its owner handed to someone else, and that refund would never
+      // land (review of escrow v4).
+      const missing = !info || onlySol(info);
+      if (missing) {
+        const rent = await getMinimumBalanceForRentExemptAccount(conn);
+        await requireFeeFunds(conn, payer, RECOVERY_FLOOR_LAMPORTS + rent + 20_000);
+      }
       await p.methods
-        .claimRefund(toBn(id))
-        .accountsPartial({ mint: mint(), playerAta: ata(k), tokenProgram: TOKEN_PROGRAM_ID })
-        .preInstructions([createAssociatedTokenAccountIdempotentInstruction(payer, ata(k), k, mint(), TOKEN_PROGRAM_ID)])
+        .claimRefund(toBn(id), k)
+        .accountsPartial({ mint: mint(), playerAta: usual, tokenProgram: TOKEN_PROGRAM_ID })
+        .preInstructions(missing ? [createAssociatedTokenAccountIdempotentInstruction(payer, usual, k, mint(), TOKEN_PROGRAM_ID)] : [])
         .rpc();
     } catch (e) {
       failed.push(k.toBase58());
@@ -116,10 +131,13 @@ export async function sweepOwed(p: EscrowProgram, payer: PublicKey, until: numbe
     // An open match whose opening reply was lost: the room never heard its
     // id and closed without asking for it to be closed, and with nothing
     // ever collected it has no deadline, so it held its rent for good
-    // (review, 2026-10-12). Nobody could join it (the room never had its id),
-    // so only an empty one: cancelled, then closed like the rest.
+    // (review, 2026-10-12). Cancelled, then closed like the rest, once
+    // nothing has been collected into it.
     const createdMs = Number(BigInt(m.id.toString()) / 1000n);
-    const staleOpen = state === "open" && refundAfter === 0 && m.players.length === 0 && Date.now() - createdMs > STALE_OPEN_MS;
+    // Joined players too (security review, 2026-10-14): a join only approves,
+    // nothing of theirs is in the vault, and approvals whose money was sent
+    // on could hold a pool open for good. Two days is far past any fill.
+    const staleOpen = state === "open" && refundAfter === 0 && owed === 0 && Date.now() - createdMs > STALE_OPEN_MS;
     const due = state === "cancelled" || (state === "collected" && expired) || (state === "open" && expired && owed > 0) || staleOpen;
     if (!due) continue;
     // A short pool is cancelled and refunded in the one call that collected

@@ -41,7 +41,7 @@ export const POST = endpoint(async (body, req) => {
   // The rest of the account (settings, loadout, record) rides the same door:
   // a function of its own would pass the hosting plan's limit of twelve.
   if (message.startsWith("RatPool account\n")) return saveAccountState(body, req!);
-  if (message.startsWith("RatPool account read\n")) return readAccountState(body);
+  if (message.startsWith("RatPool account read\n")) return readAccountState(body, req!);
   // And invites (api/_referral.ts), for the same reason.
   if (isReferralMessage(message)) return referralMessage(body, req);
 
