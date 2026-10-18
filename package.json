@@ -1,0 +1,79 @@
+{
+  "name": "ratpool",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "RatPool — skill-based, real-money 2D arena shooter on Solana. Mobile/tablet-first (landscape), synced to desktop web.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host",
+    "typecheck": "tsc -b --noEmit",
+    "check:level": "node --experimental-strip-types scripts/check-level.mjs",
+    "check": "tsc -b --noEmit && tsc -p api --noEmit && npm run check:level",
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:desktop": "node scripts/smoke.mjs --desktop-only",
+    "figures": "node scripts/figures.mjs",
+    "combat": "node scripts/combat.mjs",
+    "perf": "node scripts/perf.mjs",
+    "menus": "node scripts/menus.mjs",
+    "plates": "node scripts/plates.mjs",
+    "check:api": "tsc -p api --noEmit"
+  },
+  "dependencies": {
+    "@anchor-lang/core": "1.2.0",
+    "@capacitor/android": "8.5.2",
+    "@capacitor/app": "8.1.1",
+    "@capacitor/browser": "8.0.4",
+    "@capacitor/clipboard": "8.0.1",
+    "@capacitor/core": "8.5.2",
+    "@privy-io/react-auth": "3.43.0",
+    "@react-three/drei": "^9.122.0",
+    "@react-three/fiber": "^8.18.0",
+    "@react-three/postprocessing": "2.19.1",
+    "@solana-program/memo": "^0.14.0",
+    "@solana-program/system": "^0.14.1",
+    "@solana-program/token": "^0.16.1",
+    "@solana/kit": "^8.3.0",
+    "@solana/spl-token": "^0.4.15",
+    "@solana/wallet-adapter-base": "^0.9.27",
+    "@solana/wallet-adapter-react": "^0.15.39",
+    "@solana/web3.js": "^1.98.4",
+    "bs58": "^6.0.0",
+    "gsap": "3.15.0",
+    "phaser": "^3.87.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.185.1",
+    "tweetnacl": "^1.0.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.2",
+    "@cloudflare/workers-types": "^5.20260916.1",
+    "@types/node": "^26.5.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/three": "^0.185.4",
+    "@vitejs/plugin-react": "^4.3.4",
+    "javascript-obfuscator": "5.9.0",
+    "playwright": "^1.63.0",
+    "rollup-plugin-obfuscator": "1.1.0",
+    "typescript": "^5.6.3",
+    "vercel": "^59.17.0",
+    "vite": "^6.4.4",
+    "vite-plugin-node-polyfills": "^0.28.0",
+    "wrangler": "^4.132.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ],
+    "overrides": {
+      "rpc-websockets>uuid": "^11.1.0",
+      "lodash": "^4.18.0",
+      "ws@8": "^8.21.0",
+      "shell-quote": "^1.11.0",
+      "source-map-js": ">=1.2.2"
+    }
+  }
+}

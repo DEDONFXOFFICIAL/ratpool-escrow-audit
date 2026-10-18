@@ -52,6 +52,14 @@ export const POST = endpoint(async (body, req) => {
     const m = await program().account.match.fetchNullable(matchPda(id));
     const seated = m?.players.some((pl) => pl.key.equals(player) && enumKey(pl.status) === "joined");
     if (!seated) throw new HttpError(409, "Not in this pool.");
+    // Asked for before the first lands, every leave after it fails on chain
+    // and still costs the sponsor its fee: counted per wallet (only the
+    // wallet itself gets this far, so nobody can spend another's) and
+    // overall, kept locally when the database cannot answer so a player can
+    // always leave (outside report, 2026-10-18).
+    if (!await withinLimit(`sponsor:wleave:${player.toBase58()}`, 20, 3600) || !await withinLimit("sponsor:leaveall", 3000, 3600)) {
+      throw new HttpError(429, "Too many requests — try again later.");
+    }
   }
 
   // The wallet's own allowance is counted for joins only, which carry the
@@ -84,6 +92,12 @@ export const POST = endpoint(async (body, req) => {
     const src = await getAccount(conn, ata(player)).catch(() => null);
     if (!src || !src.owner.equals(player) || src.isFrozen || src.amount < BigInt(m.entry.toString())) {
       throw new HttpError(400, "Not enough USDC in this wallet for the entry.");
+    }
+    // One room ticket, a few joins at most (a retry after a lost answer),
+    // not a seat taken again and again after leaving (outside report,
+    // 2026-10-18). Its window outlasts the ticket's own.
+    if (!await withinLimit(`admit:${id}:${player.toBase58()}:${body.admitExp}`, 3, 600)) {
+      throw new HttpError(403, "Rejoin the pool to take your seat.");
     }
     if (!await withinLimit("sponsor:all", 6000, 3600)) throw new HttpError(429, "Too many requests — try again later.");
   }

@@ -19,8 +19,10 @@ const REFILL_BELOW = 2;
 export const maxDuration = 60;
 
 export const POST = endpoint(async (body, req) => {
+  // Devnet named outright: with neither set it used to mint wherever the
+  // RPC pointed (outside report, 2026-10-18).
   const clusters = [process.env.VITE_SOLANA_CLUSTER, process.env.SOLANA_CLUSTER];
-  if (clusters.some((cluster) => cluster !== undefined && cluster !== "devnet")) {
+  if (!clusters.includes("devnet") || clusters.some((cluster) => cluster !== undefined && cluster !== "devnet")) {
     throw new HttpError(403, "The faucet is for the test network only.");
   }
   const wallet = parsePubkey(body.wallet);

@@ -286,10 +286,16 @@ export function json(data: unknown, status = 200): Response {
  * spend the platform's SOL on a visitor's behalf. (`https://localhost` was the
  * app's first origin; kept until every installed copy has updated.)
  */
-const APP_ORIGINS = new Set(["https://app.ratpool.xyz", "https://localhost"]);
+// The Android app's page (capacitor.config.ts, every build since 20; the
+// minimum is far past it). https://localhost was an older app's and is gone
+// (outside report, 2026-10-18).
+const APP_ORIGINS = new Set(["https://app.ratpool.xyz"]);
 
 export function clientIp(req: Request): string {
-  return req.headers.get("x-forwarded-for")?.split(",")[0].trim()
+  // Vercel sets these itself and overwrites any a client sends; its own
+  // header first, which no proxy in front could replace either.
+  return req.headers.get("x-vercel-forwarded-for")?.split(",")[0].trim()
+    || req.headers.get("x-forwarded-for")?.split(",")[0].trim()
     || req.headers.get("x-real-ip")?.trim()
     || "unknown";
 }
@@ -329,6 +335,9 @@ export function preflight(req: Request): Response {
  * the older (req, res) style and its returned Response is dropped. Unexpected
  * errors stay in the logs; a reference lets us find them for a player.
  */
+/** The largest request body any function reads. */
+const MAX_BODY = 256 * 1024;
+
 export function endpoint(
   fn: (body: Record<string, unknown>, req?: Request) => Promise<unknown>,
   opts: { signed?: boolean } = {},
@@ -338,10 +347,14 @@ export function endpoint(
   return async (req: Request) => withCors(req, await handle(req));
   async function handle(req: Request): Promise<Response> {
     if (req.method !== "POST") return json({ error: "POST only" }, 405);
+    // Nothing honest is near this (an account save is at most 64 KB): a
+    // bigger body is refused before it is read in full or parsed.
+    if (Number(req.headers.get("content-length")) > MAX_BODY) return json({ error: "body too large" }, 413);
     let body: Record<string, unknown> = {};
     let text = "";
     try {
       text = await req.text();
+      if (text.length > MAX_BODY) return json({ error: "body too large" }, 413);
       body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
     } catch {
       return json({ error: "body must be JSON" }, 400);

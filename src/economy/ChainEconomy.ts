@@ -1,4 +1,4 @@
-import { PublicKey, Transaction, type Connection } from "@solana/web3.js";
+import { PublicKey, SystemProgram, Transaction, type Connection } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import bs58 from "bs58";
 import type { MatchResult, PriceTier, RankedPlayer } from "@/state/types";
@@ -46,6 +46,8 @@ interface PendingPurchase {
   signature: string;
   at?: number;
   lvbh?: number;
+  /** The signed transaction's blockhash (ChainEconomy.cannotLand). */
+  bh?: string;
 }
 
 /**
@@ -60,6 +62,8 @@ interface PendingSend {
   signature: string;
   lvbh: number;
   at: number;
+  /** The signed transaction's blockhash (ChainEconomy.cannotLand). */
+  bh?: string;
 }
 
 /** Deliberately its own type so a screen can catch it and explain, not crash. */
@@ -263,7 +267,7 @@ export class ChainEconomy implements EconomyService {
     try {
       const st = await status();
       if (settled(st)) outcome = st!.err ? "failed" : "landed";
-      else if (!st && (await ask(this.connection.getBlockHeight("confirmed"))) > p.lvbh) {
+      else if (!st && (await this.cannotLand(ask, p.bh, p.lvbh))) {
         // Past its last block, then looked for again: it could have landed in
         // that last block between the two questions.
         const again = await status();
@@ -423,7 +427,7 @@ export class ChainEconomy implements EconomyService {
     // already on it as fee payer).
     const first = tx.signatures[0]?.signature;
     const pending: PendingSend | null = first
-      ? { from: this.owner.toBase58(), to: to.toBase58(), amount, signature: bs58.encode(first), lvbh: r.lastValidBlockHeight, at: Date.now() }
+      ? { from: this.owner.toBase58(), to: to.toBase58(), amount, signature: bs58.encode(first), lvbh: r.lastValidBlockHeight, at: Date.now(), bh: tx.recentBlockhash ?? undefined }
       : null;
     if (pending) this.savePendingSend(pending);
     try {
@@ -470,7 +474,7 @@ export class ChainEconomy implements EconomyService {
       // dry run failed): nothing was sent. Anything else may have gone out
       // with the answer lost, and is looked up (review 2026-10-07).
       if (!id0 || NOT_SENT.test(messagesOf(e))) throw notSent(explainWalletError(e));
-      const outcome = await this.outcomeOf(id0, lastValidBlockHeight);
+      const outcome = await this.outcomeOf(id0, lastValidBlockHeight, tx.recentBlockhash ?? blockhash);
       if (outcome === "landed") {
         onSent?.(id0);
         return id0;
@@ -496,7 +500,7 @@ export class ChainEconomy implements EconomyService {
       // was lost used to be reported as failed, and sent again on the retry
       // (review 2026-10-07: duplicate charges). It is looked up until it has
       // either landed or can no longer land.
-      const outcome = await this.outcomeOf(signature, lastValidBlockHeight);
+      const outcome = await this.outcomeOf(signature, lastValidBlockHeight, tx.recentBlockhash ?? blockhash);
       if (outcome === "landed") return signature;
       if (outcome === "failed") throw notSent(new Error("The transaction landed but failed."));
       if (outcome === "expired") throw notSent(new Error("Not sent, nothing was taken. Try again."));
@@ -515,7 +519,21 @@ export class ChainEconomy implements EconomyService {
    * landed and failed, expired (its blockhash is past, so it can never land),
    * or unknown (the network could not be asked for two minutes).
    */
-  private async outcomeOf(signature: string, lastValidBlockHeight: number): Promise<"landed" | "failed" | "expired" | "unknown"> {
+  /**
+   * Whether a transaction can no longer land: past the height that came with
+   * the server's answer AND its own blockhash (the one the signed
+   * transaction carries) no longer valid on the network. Both, so neither a
+   * height set too low (outside report, 2026-10-18) nor a node not yet
+   * caught up with a fresh blockhash can call a live payment gone. A send
+   * saved by an older build kept only the height, and is read by it.
+   */
+  private async cannotLand(ask: <T>(q: Promise<T>) => Promise<T>, bh: string | undefined, lvbh: number | undefined): Promise<boolean> {
+    if (lvbh && (await ask(this.connection.getBlockHeight("confirmed"))) <= lvbh) return false;
+    if (bh) return !(await ask(this.connection.isBlockhashValid(bh, { commitment: "confirmed" }))).value;
+    return !!lvbh;
+  }
+
+  private async outcomeOf(signature: string, lastValidBlockHeight: number, blockhash: string): Promise<"landed" | "failed" | "expired" | "unknown"> {
     const until = Date.now() + 120_000;
     // Every question to the network ends with the two minutes, answered or not.
     const ask = <T,>(p: Promise<T>) =>
@@ -527,12 +545,20 @@ export class ChainEconomy implements EconomyService {
         const st = (await ask(this.connection.getSignatureStatuses([signature], { searchTransactionHistory: true }))).value[0];
         if (settled(st)) return st!.err ? "failed" : "landed";
         if (!st && (await ask(this.connection.getBlockHeight("confirmed"))) > lastValidBlockHeight) {
-          // Past its last valid block and not found: one more look, in case it
-          // landed in the last block before the answer was read. Only a
-          // confirmed answer counts; a processed one can still fall away.
-          const again = (await ask(this.connection.getSignatureStatuses([signature], { searchTransactionHistory: true }))).value[0];
-          if (settled(again)) return again!.err ? "failed" : "landed";
-          if (!again) return "expired";
+          // The height came with the server's answer; the network says for
+          // itself whether the transaction's own blockhash can still land it.
+          // Told "not sent" on a height set too low, a player paid again
+          // while the first could still land (outside report, 2026-10-18).
+          // No answer: not called expired.
+          const valid = await ask(this.connection.isBlockhashValid(blockhash, { commitment: "confirmed" })).then((r) => r.value, () => true);
+          if (!valid) {
+            // Then one more look, in that order: it could have landed in its
+            // last block before the blockhash ran out. Only a confirmed
+            // answer counts; a processed one can still fall away.
+            const again = (await ask(this.connection.getSignatureStatuses([signature], { searchTransactionHistory: true }))).value[0];
+            if (settled(again)) return again!.err ? "failed" : "landed";
+            if (!again) return "expired";
+          }
         }
       } catch {
         /* the network did not answer this time: ask again */
@@ -556,7 +582,10 @@ export class ChainEconomy implements EconomyService {
    */
   async getBalance(): Promise<number> {
     const info = await this.connection.getAccountInfo(this.ata());
-    if (info === null) return 0;
+    // Nothing there yet, or only SOL someone sent to the address before the
+    // account was made: no USDC. That read used to fail (outside report,
+    // 2026-10-18).
+    if (info === null || (info.owner.equals(SystemProgram.programId) && info.data.length === 0)) return 0;
     const bal = await this.connection.getTokenAccountBalance(this.ata());
     return fromBaseUnits(BigInt(bal.value.amount));
   }
@@ -631,7 +660,7 @@ export class ChainEconomy implements EconomyService {
     const id0 = tx.signatures[0]?.signature;
     const queued = itemId && id0 ? bs58.encode(id0) : null;
     if (itemId && queued) {
-      this.savePendingPurchases([...this.pendingPurchases(), { from, item: itemId, signature: queued, at: Date.now(), lvbh: r.lastValidBlockHeight }]);
+      this.savePendingPurchases([...this.pendingPurchases(), { from, item: itemId, signature: queued, at: Date.now(), lvbh: r.lastValidBlockHeight, bh: tx.recentBlockhash ?? undefined }]);
     }
     let signature: string;
     try {
@@ -686,8 +715,8 @@ export class ChainEconomy implements EconomyService {
       // Queued by an older build, which did not keep its last block: only a
       // day on, far past any transaction's life of a minute or two and any
       // clock error short of a day, and never without its time.
-      const expired = p.lvbh
-        ? (await ask(this.connection.getBlockHeight("confirmed"))) > p.lvbh
+      const expired = p.bh || p.lvbh
+        ? await this.cannotLand(ask, p.bh, p.lvbh)
         : !!p.at && Date.now() - p.at > 24 * 3600_000;
       return expired && (await absent());
     } catch {

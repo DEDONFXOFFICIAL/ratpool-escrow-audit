@@ -3,7 +3,7 @@ import { createAssociatedTokenAccountIdempotentInstruction, getMinimumBalanceFor
 import bs58 from "bs58";
 import { collectedPlayers, enumKey, IDL, PROGRAM_ID, toBn, TOKEN_PROGRAM_ID, type EscrowProgram, type MatchAccount } from "../src/chain/escrow.js";
 import { ata, mint, onlySol, requireFeeFunds } from "./_lib.js";
-import { dbUpdate, withinLimit, withinSharedLimit } from "./_db.js";
+import { dbSelect, dbUpdate, withinLimit, withinSharedLimit } from "./_db.js";
 
 /**
  * Every collected stake in a match back to its player.
@@ -116,6 +116,7 @@ export async function sweepOwed(p: EscrowProgram, payer: PublicKey, until: numbe
     filters: [{ memcmp: { offset: 0, bytes: MATCH_DISCRIMINATOR } }],
   })];
   const out: SweepResult = { matches: accounts.length, refunded: 0, owed: 0 };
+  const paid: MatchAccount[] = [];
   const now = Date.now() / 1000;
   // A different order every sweep: a match whose refunds keep failing must
   // not take the whole budget, sweep after sweep, from the ones behind it.
@@ -147,6 +148,11 @@ export async function sweepOwed(p: EscrowProgram, payer: PublicKey, until: numbe
     // nothing of theirs is in the vault, and approvals whose money was sent
     // on could hold a pool open for good. Two days is far past any fill.
     const staleOpen = state === "open" && refundAfter === 0 && owed === 0 && Date.now() - createdMs > STALE_OPEN_MS;
+    // Paid out: its rent is seen to after every refund (below).
+    if (state === "settled") {
+      paid.push(m);
+      continue;
+    }
     const due = state === "cancelled" || (state === "collected" && expired) || (state === "open" && expired && owed > 0) || staleOpen;
     if (!due) continue;
     // A short pool is cancelled and refunded in the one call that collected
@@ -178,6 +184,25 @@ export async function sweepOwed(p: EscrowProgram, payer: PublicKey, until: numbe
       if (!owed) await dbUpdate("matches", { id: id.toString() }, { state: "closed" });
     } catch (e) {
       console.error("[sweep] not closed yet", { id: id.toString(), error: (e as Error).message });
+    }
+  }
+  // Paid out and recorded, but its close (sent once, never confirmed,
+  // api/match/settle.ts sendClose) did not land: its rent stayed (outside
+  // report, 2026-10-18). Closed once the record is in the database, after
+  // every refund, and the record stays "settled" (a paid match is read by
+  // it). Without the record it waits, since the room's next call writes it;
+  // with the database not answering, the rest wait for the next sweep.
+  for (const m of paid) {
+    if (Date.now() > until) break;
+    const id = BigInt(m.id.toString());
+    const rows = await dbSelect<{ state: string; signature: string | null }>(`matches?id=eq.${id}&select=state,signature`);
+    if (rows === null) break;
+    if (rows[0]?.state !== "settled" || !rows[0].signature) continue;
+    try {
+      await closeFinished(p, id, m, payer);
+      console.log("[sweep] a paid match closed", { id: id.toString() });
+    } catch (e) {
+      console.error("[sweep] paid match not closed yet", { id: id.toString(), error: (e as Error).message });
     }
   }
   return out;

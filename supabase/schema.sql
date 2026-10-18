@@ -61,6 +61,12 @@ create table if not exists public.accounts (
 alter table public.accounts enable row level security;
 drop policy if exists "public read" on public.accounts;
 create policy "public read" on public.accounts for select using (true);
+-- Who has an account and when it changed are public; what is in it is not.
+-- In the base schema too, not only in 2026-09-30-earnings-purchases-privacy.sql:
+-- a database built from this file alone exposed every account (outside
+-- report, 2026-10-18).
+revoke select on public.accounts from anon, authenticated;
+grant select (wallet, updated_at) on public.accounts to anon, authenticated;
 
 create or replace view public.leaderboard
   with (security_invoker = true) as

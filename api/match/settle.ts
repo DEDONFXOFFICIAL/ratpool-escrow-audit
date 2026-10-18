@@ -154,6 +154,14 @@ async function sendClose(p: EscrowProgram, id: bigint, feeWallet: PublicKey): Pr
  */
 async function findSettlement(p: EscrowProgram, id: bigint, hint?: string): Promise<(Payout & { unpaired: boolean }) | null> {
   const conn = p.provider.connection;
+  // Inside the function's minute, whatever the network's pace, from the
+  // first question on: a search cut short is asked again by the room (503),
+  // never answered "no payout", which ends the room's recovery (outside
+  // report, 2026-10-18).
+  const until = Date.now() + 35_000;
+  const cutShort = () => new HttpError(503, "the payout search ran out of time; ask again");
+  const inTime = <T,>(q: Promise<T>) =>
+    Promise.race([q, new Promise<never>((_, no) => setTimeout(() => no(cutShort()), Math.max(1, until - Date.now())))]);
   // This version's receipts first, then v3's (no referred list): a reader of
   // one cannot read the other.
   const parsers = [new EventParser(p.programId, p.coder), new EventParser(p.programId, new BorshCoder(IDL_V3 as unknown as Idl))];
@@ -170,8 +178,11 @@ async function findSettlement(p: EscrowProgram, id: bigint, hint?: string): Prom
   };
   // One transaction, read for this match's payout (MatchSettled, this id).
   const readOne = async (signature: string): Promise<(Payout & { unpaired: boolean }) | null> => {
-    const tx = await conn.getTransaction(signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
-    for (const ev of eventsIn(tx?.meta?.logMessages ?? [])) {
+    const tx = await inTime(conn.getTransaction(signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" }));
+    // A transaction that failed paid nothing, whatever its logs printed
+    // before it did (outside report, 2026-10-18).
+    if (!tx || tx.meta?.err) return null;
+    for (const ev of eventsIn(tx.meta?.logMessages ?? [])) {
       // "matchSettled" or "MatchSettled", by which IDL the coder was built from.
       if (ev.name.toLowerCase() !== "matchsettled") continue;
       const d = ev.data as Record<string, unknown>;
@@ -194,7 +205,7 @@ async function findSettlement(p: EscrowProgram, id: bigint, hint?: string): Prom
       if (referrers.length && named.length === referrers.length) {
         named.forEach((friend, k) => referred.push({ friend, referrer: referrers[k], amount: referralAmounts[k] ?? 0n }));
       } else if (referrers.length) {
-        const infos = await conn.getMultipleAccountsInfo(winners.map((w) => referralPda(new PublicKey(w))), "confirmed");
+        const infos = await inTime(conn.getMultipleAccountsInfo(winners.map((w) => referralPda(new PublicKey(w))), "confirmed"));
         const recorded = winners
           .map((w, i) => {
             const info = infos[i];
@@ -234,7 +245,8 @@ async function findSettlement(p: EscrowProgram, id: bigint, hint?: string): Prom
   // match's own short history however much was added after it. Bounded.
   const sigs: Awaited<ReturnType<typeof conn.getSignaturesForAddress>> = [];
   for (let before: string | undefined, page = 0; page < 20; page++) {
-    const batch = await conn.getSignaturesForAddress(matchPda(id), { limit: 1000, before });
+    if (Date.now() > until) throw cutShort();
+    const batch = await inTime(conn.getSignaturesForAddress(matchPda(id), { limit: 1000, before }));
     sigs.push(...batch);
     if (batch.length < 1000) break;
     before = batch[batch.length - 1].signature;
@@ -243,6 +255,7 @@ async function findSettlement(p: EscrowProgram, id: bigint, hint?: string): Prom
   let looked = 0;
   for (const s of order) {
     if (++looked > 400) break;
+    if (Date.now() > until) throw cutShort();
     if (s.err) continue;
     const got = await readOne(s.signature);
     if (got) return got;
