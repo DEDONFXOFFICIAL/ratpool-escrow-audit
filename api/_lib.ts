@@ -6,6 +6,7 @@ import { escrowProgram, TOKEN_PROGRAM_ID, type EscrowProgram } from "../src/chai
 import { PRICE_TIERS, type PriceTier } from "../src/state/types.js";
 import { withinLimit } from "./_db.js";
 import { readWalletRequest, type WalletAction } from "../src/chain/walletRequest.js";
+import { clientIp } from "./_ip.js";
 
 /**
  * What every function under /api shares: the keys, the connection, the
@@ -291,14 +292,8 @@ export function json(data: unknown, status = 200): Response {
 // (outside report, 2026-10-18).
 const APP_ORIGINS = new Set(["https://app.ratpool.xyz"]);
 
-export function clientIp(req: Request): string {
-  // Vercel sets these itself and overwrites any a client sends; its own
-  // header first, which no proxy in front could replace either.
-  return req.headers.get("x-vercel-forwarded-for")?.split(",")[0].trim()
-    || req.headers.get("x-forwarded-for")?.split(",")[0].trim()
-    || req.headers.get("x-real-ip")?.trim()
-    || "unknown";
-}
+
+export { clientIp };
 
 export function ipKey(req: Request): string {
   // Counters need a stable key, not a stored address.
