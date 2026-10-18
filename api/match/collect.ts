@@ -32,10 +32,11 @@ export const POST = endpoint(async (body) => {
   const id = parseId(body.id);
   const p = program();
   const auth = authority().publicKey;
-  await requireFeeFunds(p.provider.connection, auth);
   const matchKey = matchPda(id);
-
-  let m = await p.account.match.fetch(matchKey);
+  // Asked together: the players are waiting on the lock (owner, 2026-10-18:
+  // "it's supposed to be as instant as" the payout).
+  const [, first] = await Promise.all([requireFeeFunds(p.provider.connection, auth), p.account.match.fetch(matchKey)]);
+  let m = first;
   if (enumKey(m.state) !== "open") throw new HttpError(409, "match is not open");
   // The room's minimum (six for a pool) when it names one, never below the
   // one the match was created with (pinned on chain, escrow v2).
@@ -100,6 +101,10 @@ export const POST = endpoint(async (body) => {
     };
   }
 
+  // Everyone in one batch with nothing taken before: the start rides in the
+  // same transaction as the collection, after it, so the minimum check
+  // (min_after) guards both and one confirmation does the work of two.
+  let startedWith = false;
   for (let i = 0; already + payable.length >= minimum && i < payable.length; i += BATCH) {
     const batch = payable.slice(i, i + BATCH);
     // The last batch asks the program for the room's minimum once it is
@@ -107,13 +112,16 @@ export const POST = endpoint(async (body) => {
     // player withdrawing between the check above and this used to leave the
     // pool short and the match cancelled (security review, 2026-10-14).
     const last = i + BATCH >= payable.length;
+    const withStart = last && i === 0 && already === 0;
     try {
       await p.methods
         .collect(toBn(id), last ? Math.min(minimum, 255) : 0)
         .accountsPartial({ mint: mint(), authority: auth, tokenProgram: TOKEN_PROGRAM_ID })
         .remainingAccounts(batch.map((j) => ({ pubkey: j.account, isSigner: false, isWritable: true })))
         .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })])
+        .postInstructions(withStart ? [await p.methods.start(toBn(id)).accountsPartial({ authority: auth }).instruction()] : [])
         .rpc();
+      if (withStart) startedWith = true;
     } catch (e) {
       if (!last || !/TooFewPlayers/.test(String((e as Error)?.message ?? e) + JSON.stringify((e as { logs?: unknown })?.logs ?? ""))) throw e;
       // Nothing of this batch moved. With nothing moved before it either, the
@@ -162,7 +170,10 @@ export const POST = endpoint(async (body) => {
     };
   }
 
-  await p.methods.start(toBn(id)).accountsPartial({ authority: auth }).rpc();
+  if (!startedWith) {
+    await p.methods.start(toBn(id)).accountsPartial({ authority: auth }).rpc();
+    m = await p.account.match.fetch(matchKey);
+  }
   await dbUpdate(
     "matches",
     { id: id.toString() },
@@ -173,6 +184,10 @@ export const POST = endpoint(async (body) => {
     collected: stakers.length,
     dropped,
     pool: Number(m.pool),
+    // Who paid and when the match started, as the chain has them: the room
+    // goes straight to its countdown instead of asking again.
+    players: m.players.map((pl) => ({ wallet: pl.key.toBase58(), status: enumKey<string>(pl.status) })),
+    collectedAt: Number(m.collectedAt),
   };
 }, { signed: true });
 
