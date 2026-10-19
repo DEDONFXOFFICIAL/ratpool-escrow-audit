@@ -151,12 +151,6 @@ async function sendClose(p: EscrowProgram, id: bigint, feeWallet: PublicKey): Pr
 }
 
 /**
- * The settlement of match `id`, from its MatchSettled event on chain, or
- * null if the match's history has none. The referral payments are paired
- * back with the finishers who earned them through the database; if it
- * cannot be read they are left out, and record() reports the gap.
- */
-/**
  * A match's history walked newest first from `from` (exclusive), a page of
  * the chain's listing at a time, five read at once, until `late()`: the
  * first thing `read` finds; or where it got to (the last transaction read),
@@ -186,14 +180,12 @@ export async function walkHistory<T>(
     for (let i = 0; i < sigs.length; i += 5) {
       if (late() && last) return { searchFrom: last };
       const batch = sigs.slice(i, i + 5);
-      let got: (T | null)[];
-      try {
-        got = await Promise.all(batch.filter((s) => !s.err).map((s) => read(s.signature)));
-      } catch (e) {
-        return stop(e);
-      }
-      const found = got.find((g) => g !== null);
-      if (found) return found;
+      // All of the batch, settled: a payout read beside one that failed is
+      // still the payout; a failure with none found keeps the place.
+      const got = await Promise.allSettled(batch.filter((s) => !s.err).map((s) => read(s.signature)));
+      for (const g of got) if (g.status === "fulfilled" && g.value !== null) return g.value;
+      const failed = got.find((g): g is PromiseRejectedResult => g.status === "rejected");
+      if (failed) return stop(failed.reason);
       last = batch[batch.length - 1].signature;
     }
     if (sigs.length < 1000) return null;
@@ -245,9 +237,13 @@ async function findSettlement(
   // One transaction, read for this match's payout (MatchSettled, this id).
   const readOne = async (signature: string): Promise<(Payout & { unpaired: boolean }) | null> => {
     const tx = await inTime(conn.getTransaction(signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" }));
+    // Listed but not readable yet (an archive behind the listing): read
+    // again next time, never passed over, or a payout skipped here was lost
+    // for good and the match called closed without one (review, 2026-10-19).
+    if (!tx) throw new HttpError(503, "a transaction in the match's history cannot be read yet; ask again");
     // A transaction that failed paid nothing, whatever its logs printed
     // before it did (outside report, 2026-10-18).
-    if (!tx || tx.meta?.err) return null;
+    if (tx.meta?.err) return null;
     for (const ev of eventsIn(tx.meta?.logMessages ?? [])) {
       // "matchSettled" or "MatchSettled", by which IDL the coder was built from.
       if (ev.name.toLowerCase() !== "matchsettled") continue;
