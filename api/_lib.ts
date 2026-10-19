@@ -261,6 +261,8 @@ export class HttpError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** Sent beside the message (settle's search place). */
+    readonly extra?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -387,7 +389,7 @@ export function endpoint(
     try {
       return json(await fn(body, req));
     } catch (e) {
-      if (e instanceof HttpError) return json({ error: e.message }, e.status);
+      if (e instanceof HttpError) return json({ ...e.extra, error: e.message }, e.status);
       const msg = (e as Error)?.message ?? String(e);
       const ref = randomBytes(4).toString("hex");
       console.error(`[api] ${ref}`, msg, (e as Error)?.stack);

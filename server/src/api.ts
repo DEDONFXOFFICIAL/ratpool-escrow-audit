@@ -53,6 +53,8 @@ export interface Env {
   NEVER_FIRED?: string;
   /** Seconds: a kill of the same rat sooner than this after the last scores nothing (room.ts kill). Unset or 0: off. */
   REPEAT_KILL_SECONDS?: string;
+  /** Milliseconds: a pool's hit by a bullet or a rocket on where its target was longer ago than this is refused (room.ts lateness). Unset or 0: watched. */
+  REWIND_LIMIT_MS?: string;
 }
 
 const hex = (buf: ArrayBuffer) =>
@@ -161,6 +163,8 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
+    /** The function's whole answer, when it sent one (settle's search place). */
+    public data?: unknown,
   ) {
     super(message);
   }
@@ -190,7 +194,7 @@ export async function api<T>(env: Env, path: string, body: unknown): Promise<T> 
     /* not JSON */
   }
   if (!res.ok) {
-    throw new ApiError((data as { error?: string } | null)?.error ?? raw ?? `${res.status} from ${path}`, res.status);
+    throw new ApiError((data as { error?: string } | null)?.error ?? raw ?? `${res.status} from ${path}`, res.status, data);
   }
   return data as T;
 }

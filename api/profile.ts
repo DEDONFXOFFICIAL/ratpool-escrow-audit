@@ -1,5 +1,5 @@
 import { preflight, endpoint, HttpError, ipKey, parsePubkey, signedBy } from "./_lib.js";
-import { DB_ENABLED, dbSelect, dbUpsert, withinLimit } from "./_db.js";
+import { DB_ENABLED, dbInsertNew, dbPatchCount, dbSelect, withinLimit } from "./_db.js";
 import { readAccountState, saveAccountState } from "./_account.js";
 import { isReferralMessage, referralMessage, verifyReferral } from "./_referral.js";
 
@@ -23,7 +23,8 @@ import { isReferralMessage, referralMessage, verifyReferral } from "./_referral.
  *   issued: <ISO time>
  *
  * The time keeps an old signature from being replayed later to undo a newer
- * change; ten minutes is generous for a wallet prompt.
+ * change; ten minutes is generous for a wallet prompt. Within them, the save
+ * is stored with its signed time and only ever replaces an older one.
  */
 const MAX_AGE_MS = 10 * 60 * 1000;
 const NAME_MAX = 24;
@@ -80,24 +81,39 @@ export const POST = endpoint(async (body, req) => {
   // Per wallet only once its signature is checked, so nobody can use up a
   // player's saves in their name; and a new profile is counted apart.
   if (!(await withinLimit(`profile:w:${wallet.toBase58()}`, 30, 3600))) throw new HttpError(429, "Too many saves. Try again later.");
-  const existing = await dbSelect<{ wallet: string }>(`profiles?wallet=eq.${wallet.toBase58()}&select=wallet&limit=1`);
-  if (existing === null) throw new HttpError(502, "the profile could not be saved");
-  if (
-    !existing.length &&
-    (!(await withinLimit(`profile:new:ip:${ipKey(req!)}`, 50, 86400)) || !(await withinLimit("profile:new:all", 3000, 86400)))
-  ) {
-    throw new HttpError(429, "Too many new players right now. Try again later.");
-  }
 
-  const written = await dbUpsert("profiles", {
-    wallet: wallet.toBase58(),
-    name,
-    traits,
-    updated_at: new Date().toISOString(),
-  });
-  if (!written) throw new HttpError(502, "the profile could not be saved");
+  // Never older over newer: an earlier signed save replayed within its ten
+  // minutes put back an older name or look (security review, 2026-10-13).
+  // As account saves (_account.ts): stored with its signed time, and written
+  // only over an older one, the condition the write's own (one statement).
+  const w = wallet.toBase58();
+  const at = new Date(issued).toISOString();
+  const overOlder = async () => {
+    const n = await dbPatchCount(`profiles?wallet=eq.${w}&updated_at=lt.${encodeURIComponent(at)}&select=wallet`, { name, traits, updated_at: at });
+    if (n === null) throw new HttpError(502, "the profile could not be saved");
+    return n > 0;
+  };
+  if (!(await overOlder())) {
+    // Nothing older to replace: a new rat, or a newer save is there, or
+    // another save made the rat a moment ago (asked once more against it).
+    const there = await dbSelect<{ wallet: string }>(`profiles?wallet=eq.${w}&select=wallet&limit=1`);
+    if (there === null) throw new HttpError(502, "the profile could not be saved");
+    if (there.length) {
+      if (!(await overOlder())) throw new HttpError(409, "a newer save exists");
+    } else {
+      if (!(await withinLimit(`profile:new:ip:${ipKey(req!)}`, 50, 86400)) || !(await withinLimit("profile:new:all", 3000, 86400))) {
+        throw new HttpError(429, "Too many new players right now. Try again later.");
+      }
+      const created = await dbInsertNew("profiles", { wallet: w, name, traits, updated_at: at });
+      if (created === "exists") {
+        if (!(await overOlder())) throw new HttpError(409, "a newer save exists");
+      } else if (created !== "ok") {
+        throw new HttpError(502, "the profile could not be saved");
+      }
+    }
+  }
   // A rat now exists: an invite this player claimed before building it counts.
-  await verifyReferral(wallet.toBase58());
+  await verifyReferral(w);
   return { ok: true };
 });
 

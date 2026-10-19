@@ -53,10 +53,14 @@ export const POST = endpoint(async (body) => {
     // The room sends the payout it already saw: read directly, it cannot be
     // buried under transactions others sent to the match's account.
     const hint = typeof body.paidSig === "string" && /^[1-9A-HJ-NP-Za-km-z]{64,90}$/.test(body.paidSig) ? body.paidSig : undefined;
-    const done = await findSettlement(p, id, hint);
+    // Where the room's last search stopped, to go on from there.
+    const from = typeof body.searchFrom === "string" && /^[1-9A-HJ-NP-Za-km-z]{64,90}$/.test(body.searchFrom) ? body.searchFrom : undefined;
+    const done = await findSettlement(p, id, hint, from);
+    if (done && "searchFrom" in done) throw new HttpError(503, "the payout search goes on; ask again", { searchFrom: done.searchFrom });
     if (!done) {
       if (state === "closed") throw new HttpError(410, "match was closed without a payout");
-      throw new HttpError(503, "match is paid; its receipt cannot be read yet");
+      // The whole history read and no receipt (an archive behind): the next search starts from the newest again.
+      throw new HttpError(503, "match is paid; its receipt cannot be read yet", { searchFrom: null });
     }
     const wallets = ranking.map((w) => w.toBase58());
     // A closed match no longer lists its stakers; in a pool room everyone
@@ -152,7 +156,69 @@ async function sendClose(p: EscrowProgram, id: bigint, feeWallet: PublicKey): Pr
  * back with the finishers who earned them through the database; if it
  * cannot be read they are left out, and record() reports the gap.
  */
-async function findSettlement(p: EscrowProgram, id: bigint, hint?: string): Promise<(Payout & { unpaired: boolean }) | null> {
+/**
+ * A match's history walked newest first from `from` (exclusive), a page of
+ * the chain's listing at a time, five read at once, until `late()`: the
+ * first thing `read` finds; or where it got to (the last transaction read),
+ * once at least one batch is read, also when a read or a page fails or runs
+ * out of time (the failed batch is read again next time); or null at the
+ * history's start.
+ */
+export async function walkHistory<T>(
+  page: (before?: string) => Promise<{ signature: string; err: unknown }[]>,
+  read: (signature: string) => Promise<T | null>,
+  from: string | undefined,
+  late: () => boolean,
+): Promise<T | { searchFrom: string } | null> {
+  let before = from;
+  let last: string | undefined;
+  const stop = (e: unknown) => {
+    if (last) return { searchFrom: last };
+    throw e;
+  };
+  for (;;) {
+    let sigs: { signature: string; err: unknown }[];
+    try {
+      sigs = await page(before);
+    } catch (e) {
+      return stop(e);
+    }
+    for (let i = 0; i < sigs.length; i += 5) {
+      if (late() && last) return { searchFrom: last };
+      const batch = sigs.slice(i, i + 5);
+      let got: (T | null)[];
+      try {
+        got = await Promise.all(batch.filter((s) => !s.err).map((s) => read(s.signature)));
+      } catch (e) {
+        return stop(e);
+      }
+      const found = got.find((g) => g !== null);
+      if (found) return found;
+      last = batch[batch.length - 1].signature;
+    }
+    if (sigs.length < 1000) return null;
+    before = sigs[sigs.length - 1].signature;
+    if (late()) return { searchFrom: before };
+  }
+}
+
+/**
+ * The payout of a match the chain has paid, read from its receipt: the room's
+ * own record of it first (`hint`), then the match's history, newest first, a
+ * page of the chain's listing at a time, five read at once, until the
+ * function's time is nearly up. Anyone can name a match's account in
+ * transactions of their own, and a search starting over on every ask stayed
+ * buried under enough of them for good (security review, 2026-10-13), so
+ * one cut short answers where it got to (`searchFrom`: the last transaction
+ * read), the room keeps it and the next ask goes on from there (`from`).
+ * Null once the whole history is read without a payout.
+ */
+async function findSettlement(
+  p: EscrowProgram,
+  id: bigint,
+  hint?: string,
+  from?: string,
+): Promise<(Payout & { unpaired: boolean }) | { searchFrom: string } | null> {
   const conn = p.provider.connection;
   // Inside the function's minute, whatever the network's pace, from the
   // first question on: a search cut short is asked again by the room (503),
@@ -233,34 +299,17 @@ async function findSettlement(p: EscrowProgram, id: bigint, hint?: string): Prom
     return null;
   };
   // The payout the room already saw, when it says so: read first, directly.
-  if (hint) {
+  if (hint && !from) {
     const got = await readOne(hint).catch(() => null);
     if (got) return got;
   }
-  // The match's whole history, not only its last fifty entries: anyone can
-  // name the match's account in transactions of their own, and fifty of them
-  // hid the payout from this search for good (review, 2026-10-12). The last
-  // fifty first, where a payout normally is (it and the close are the
-  // newest); then the rest from the start, where the payout comes within the
-  // match's own short history however much was added after it. Bounded.
-  const sigs: Awaited<ReturnType<typeof conn.getSignaturesForAddress>> = [];
-  for (let before: string | undefined, page = 0; page < 20; page++) {
-    if (Date.now() > until) throw cutShort();
-    const batch = await inTime(conn.getSignaturesForAddress(matchPda(id), { limit: 1000, before }));
-    sigs.push(...batch);
-    if (batch.length < 1000) break;
-    before = batch[batch.length - 1].signature;
-  }
-  const order = [...sigs.slice(0, 50), ...sigs.slice(50).reverse()];
-  let looked = 0;
-  for (const s of order) {
-    if (++looked > 400) break;
-    if (Date.now() > until) throw cutShort();
-    if (s.err) continue;
-    const got = await readOne(s.signature);
-    if (got) return got;
-  }
-  return null;
+  // Stopped with time to answer: what was read is not read again.
+  return walkHistory(
+    (before) => inTime(conn.getSignaturesForAddress(matchPda(id), { limit: 1000, before })),
+    readOne,
+    from,
+    () => Date.now() > until - 4_000,
+  );
 }
 
 /**
