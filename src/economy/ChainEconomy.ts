@@ -4,6 +4,7 @@ import bs58 from "bs58";
 import type { MatchResult, PriceTier, RankedPlayer } from "@/state/types";
 import { setPlatformFee } from "@/state/types";
 import {
+  CLUSTER,
   USDC,
   SERVER_URL,
   fromBaseUnits,
@@ -372,7 +373,7 @@ export class ChainEconomy implements EconomyService {
   private prove(action: WalletAction, detail: string): Promise<WalletProof> {
     const sign = this.wallet.signMessage;
     if (!sign) throw new Error("This wallet cannot sign. Sign in again.");
-    return proveWalletRequest(this.owner.toBase58(), action, detail, sign);
+    return proveWalletRequest(this.owner.toBase58(), action, detail, sign, CLUSTER);
   }
 
   /**

@@ -18,7 +18,7 @@ export async function claimTestUsdc(
   wallet: string,
   signMessage: (message: Uint8Array) => Promise<Uint8Array>,
 ): Promise<{ signature: string; balance: number }> {
-  const proof = await proveWalletRequest(wallet, "faucet", FAUCET_DETAIL, signMessage);
+  const proof = await proveWalletRequest(wallet, "faucet", FAUCET_DETAIL, signMessage, CLUSTER);
   const res = await fetch(SERVER_URL + "/api/faucet", {
     method: "POST",
     headers: { "content-type": "application/json" },

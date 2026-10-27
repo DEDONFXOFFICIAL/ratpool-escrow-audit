@@ -1,6 +1,6 @@
 import { randomInt } from "node:crypto";
 import { PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
-import { connection, HttpError, ipKey, parsePubkey, program, requireFeeFunds, signedBy, sponsor } from "./_lib.js";
+import { checkSignedFor, connection, HttpError, ipKey, parsePubkey, program, requireFeeFunds, signedBy, sponsor } from "./_lib.js";
 import { DB_ENABLED, dbInsertNew, dbPatch, dbSelect, withinLimit, withinSharedLimit } from "./_db.js";
 import { configPda, guardPda, ownedByEscrow, referralPda } from "../src/chain/escrow.js";
 
@@ -68,6 +68,7 @@ export async function referralMessage(body: Record<string, unknown>, req?: Reque
     const l = lines.find((x) => x.startsWith(k + ": "));
     return l ? l.slice(k.length + 2) : null;
   };
+  checkSignedFor(message);
   const wallet = parsePubkey(field("wallet"));
   const issued = Date.parse(field("issued") ?? "");
   if (!Number.isFinite(issued) || Math.abs(Date.now() - issued) > MAX_AGE_MS) throw new HttpError(400, "signature too old");

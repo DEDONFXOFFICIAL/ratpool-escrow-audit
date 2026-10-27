@@ -1,1 +1,1 @@
-Extracted from the private RatPool repository at commit aa4b193 on 2026-10-19.
+Extracted from the private RatPool repository at commit c7cb8b5 on 2026-10-27.

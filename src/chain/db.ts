@@ -2,7 +2,8 @@ import type { PublicKey } from "@solana/web3.js";
 import type { Character, CharacterTraits } from "@/state/types";
 import type { Board, BoardRow } from "@/state/leaderboard";
 import { BOARD_SIZE } from "@/state/leaderboard";
-import { CHAIN_ENABLED, SERVER_URL } from "./config";
+import { CHAIN_ENABLED, CLUSTER, SERVER_URL } from "./config";
+import { signedForLines } from "./walletRequest";
 
 /**
  * The database, from the browser's side: reads only.
@@ -97,6 +98,7 @@ export async function fetchProfile(wallet: string): Promise<Character | null | u
 export function profileMessage(wallet: string, c: Character): string {
   return [
     "RatPool profile",
+    ...signedForLines(CLUSTER),
     `wallet: ${wallet}`,
     `name: ${c.displayName}`,
     `traits: ${JSON.stringify(c.traits)}`,
@@ -147,7 +149,9 @@ export async function fetchAccount(
   // Private since 2026-09-30: read through the server with a silent wallet
   // signature, the same proof a save uses. No wallet yet is "cannot tell".
   if (!DB_ENABLED || !wallet || !signMessage) return undefined;
-  const message = ["RatPool account read", `wallet: ${wallet.toBase58()}`, `issued: ${new Date().toISOString()}`].join("\n");
+  const message = ["RatPool account read", ...signedForLines(CLUSTER), `wallet: ${wallet.toBase58()}`, `issued: ${new Date().toISOString()}`].join(
+    "\n",
+  );
   try {
     const r = await postSigned<{ state: unknown; updated_at?: string }>(message, signMessage);
     return r.state ? { state: r.state, at: Date.parse(r.updated_at ?? "") || 0 } : null;
@@ -160,6 +164,7 @@ export async function fetchAccount(
 export async function saveAccount(wallet: PublicKey, state: unknown, signMessage: SignMessage): Promise<void> {
   const message = [
     "RatPool account",
+    ...signedForLines(CLUSTER),
     `wallet: ${wallet.toBase58()}`,
     `issued: ${new Date().toISOString()}`,
     `state: ${JSON.stringify(state)}`,
@@ -335,7 +340,9 @@ async function postSigned<T>(message: string, signMessage: SignMessage): Promise
 
 /** This player's invite code (made the first time) and who has used it. */
 export function fetchInvite(wallet: PublicKey, signMessage: SignMessage): Promise<InviteInfo> {
-  const message = ["RatPool referral", `wallet: ${wallet.toBase58()}`, `issued: ${new Date().toISOString()}`].join("\n");
+  const message = ["RatPool referral", ...signedForLines(CLUSTER), `wallet: ${wallet.toBase58()}`, `issued: ${new Date().toISOString()}`].join(
+    "\n",
+  );
   return postSigned<InviteInfo>(message, signMessage);
 }
 
@@ -355,6 +362,7 @@ export function claimInvite(
 ): Promise<{ ok: true; verified: boolean; referrer?: string; record?: InviteRecord }> {
   const message = [
     "RatPool referral claim",
+    ...signedForLines(CLUSTER),
     `wallet: ${wallet.toBase58()}`,
     `code: ${code.trim().toUpperCase()}`,
     `issued: ${new Date().toISOString()}`,

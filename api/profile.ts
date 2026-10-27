@@ -1,4 +1,4 @@
-import { preflight, endpoint, HttpError, ipKey, parsePubkey, signedBy } from "./_lib.js";
+import { preflight, endpoint, checkSignedFor, HttpError, ipKey, parsePubkey, signedBy } from "./_lib.js";
 import { DB_ENABLED, dbInsertNew, dbPatchCount, dbSelect, withinLimit } from "./_db.js";
 import { readAccountState, saveAccountState } from "./_account.js";
 import { isReferralMessage, referralMessage, verifyReferral } from "./_referral.js";
@@ -52,6 +52,7 @@ export const POST = endpoint(async (body, req) => {
     return l ? l.slice(k.length + 2) : null;
   };
   if (lines[0] !== "RatPool profile") throw new HttpError(400, "not a profile message");
+  checkSignedFor(message);
   // Bounded, and counted per network before any work: a wallet costs nothing
   // to make, so saves from a script making fresh ones were unlimited in
   // number and in size (traits of any length), and could fill the database

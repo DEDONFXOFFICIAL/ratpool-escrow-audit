@@ -1,4 +1,4 @@
-import { HttpError, ipKey, parsePubkey, signedBy } from "./_lib.js";
+import { checkSignedFor, HttpError, ipKey, parsePubkey, signedBy } from "./_lib.js";
 import { DB_ENABLED, dbInsertNew, dbPatchCount, dbSelect, withinLimit } from "./_db.js";
 
 /**
@@ -41,6 +41,7 @@ export async function saveAccountState(body: Record<string, unknown>, req: Reque
     return l ? l.slice(k.length + 2) : null;
   };
   if (lines[0] !== "RatPool account") throw new HttpError(400, "not an account message");
+  checkSignedFor(message);
   const wallet = parsePubkey(field("wallet"));
   const issued = Date.parse(field("issued") ?? "");
   if (!Number.isFinite(issued) || Date.now() - issued > MAX_AGE_MS || issued - Date.now() > MAX_AHEAD_MS) {
@@ -114,6 +115,7 @@ export async function readAccountState(body: Record<string, unknown>, req: Reque
     return l ? l.slice(k.length + 2) : null;
   };
   if (lines[0] !== "RatPool account read") throw new HttpError(400, "not an account read");
+  checkSignedFor(message);
   const wallet = parsePubkey(field("wallet"));
   const issued = Date.parse(field("issued") ?? "");
   if (!Number.isFinite(issued) || Math.abs(Date.now() - issued) > MAX_AGE_MS) {

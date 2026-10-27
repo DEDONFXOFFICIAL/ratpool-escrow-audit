@@ -5,7 +5,7 @@ import { Wallet } from "@anchor-lang/core";
 import { escrowProgram, TOKEN_PROGRAM_ID, type EscrowProgram } from "../src/chain/escrow.js";
 import { PRICE_TIERS, type PriceTier } from "../src/state/types.js";
 import { withinLimit } from "./_db.js";
-import { readWalletRequest, type WalletAction } from "../src/chain/walletRequest.js";
+import { SIGNED_SITE, readWalletRequest, type WalletAction } from "../src/chain/walletRequest.js";
 import { clientIp } from "./_ip.js";
 
 /**
@@ -225,6 +225,29 @@ export function signedBy(wallet: PublicKey, message: string, signatureB64: strin
   return verify(null, Buffer.from(message, "utf8"), key, Buffer.from(signatureB64, "base64"));
 }
 
+/** The network this server serves, as the faucet reads it. */
+const API_NETWORK = process.env.SOLANA_CLUSTER || process.env.VITE_SOLANA_CLUSTER || "devnet";
+
+/**
+ * Every text a wallet signs for RatPool names this site and this network
+ * (outside report, 2026-10-18: one signed on devnet could be replayed on
+ * mainnet within its time). Named and not ours: refused. Named neither: an
+ * app from before 0.4.8.4, taken on devnet while players update and never
+ * on mainnet.
+ */
+export function checkSignedFor(message: string): void {
+  const lines = message.split("\n");
+  const site = lines.find((l) => l.startsWith("site: "));
+  const network = lines.find((l) => l.startsWith("network: "));
+  if (site === undefined && network === undefined) {
+    if (API_NETWORK === "mainnet-beta") throw new HttpError(426, "Update RatPool to continue.");
+    return;
+  }
+  if (site !== `site: ${SIGNED_SITE}` || network !== `network: ${API_NETWORK}`) {
+    throw new HttpError(400, "This was signed for another network. Update RatPool and try again.");
+  }
+}
+
 /**
  * A phone clock set by hand can be hours out; refusing it would stop that
  * phone sending at all. The nonce, not the clock, is what makes a request
@@ -243,6 +266,7 @@ export async function requireWalletProof(body: Record<string, unknown>, wallet: 
   if (!proof || typeof proof.message !== "string" || typeof proof.signature !== "string" || proof.message.length > 1024) {
     throw new HttpError(426, "Update RatPool to continue.");
   }
+  checkSignedFor(proof.message);
   const r = readWalletRequest(proof.message);
   if (!r || r.wallet !== wallet.toBase58() || r.action !== action || r.detail !== detail) {
     throw new HttpError(401, "This request was not made by this wallet.");

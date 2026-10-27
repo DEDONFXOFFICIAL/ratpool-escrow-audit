@@ -23,6 +23,7 @@ Snapshot: see `EXPORT.txt` for the source commit and date.
 | `server/src/api.ts` | The game server's signing of its calls to the site and of finishing orders for the escrow (Cloudflare Workers) |
 | `src/chain/`, `src/economy/` | The game client's on-chain code: the program interface, wallet-signed requests, and the checks every transaction passes before the player's wallet signs it |
 | `supabase/` | Database schema, row-level security and rate-limit functions |
+| `scripts/refund-expired.mjs` | Returns every stake the escrow owes, reading only the chain: no RatPool server needed (below) |
 | `vercel.json` | The site's security headers and content security policy |
 
 ## How the money moves
@@ -82,7 +83,28 @@ another instance within the request's validity window.
 - The game server's match logic, its player sign-in and its cheat detection
   are not in this extract; ask for private access to review them.
 - The refund sweep runs from the game server's schedule (not included); the
-  program's `claim_refund` itself needs no signer.
+  program's `claim_refund` itself needs no signer, and
+  `scripts/refund-expired.mjs` runs it without any RatPool server.
+
+## If RatPool's servers are down
+
+A stake never depends on RatPool being up. Each pool pins a payout deadline
+when it collects; once that passes unpaid, or the pool is cancelled, the
+program's `claim_refund` is open to anyone and sends each entry only to the
+staker's own USDC account. `scripts/refund-expired.mjs` does it for every pool
+at once, reading nothing but the chain:
+
+```
+pnpm install
+node scripts/refund-expired.mjs --dry                     # what is owed
+node scripts/refund-expired.mjs --payer my-wallet.json    # return it
+```
+
+Add `--rpc <url>` for another RPC (devnet's public one is the default).
+Whoever runs it pays the network fees and receives nothing. Tested on a local
+validator running the deployed program, byte for byte: six stakes collected,
+no payout, nothing refundable before the deadline, all six returned after it,
+none twice, and nothing to the wallet that ran it (2026-10-27).
 
 ## Building and testing the program
 
