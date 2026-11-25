@@ -4,7 +4,7 @@ import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Wallet } from "@anchor-lang/core";
 import { escrowProgram, TOKEN_PROGRAM_ID, type EscrowProgram } from "../src/chain/escrow.js";
 import { PRICE_TIERS, type PriceTier } from "../src/state/types.js";
-import { withinLimit } from "./_db.js";
+import { consumeNonce } from "./_db.js";
 import { SIGNED_SITE, readWalletRequest, type WalletAction } from "../src/chain/walletRequest.js";
 import { clientIp } from "./_ip.js";
 
@@ -276,7 +276,9 @@ export async function requireWalletProof(body: Record<string, unknown>, wallet: 
     throw new HttpError(401, "This request has expired. Try again.");
   }
   if (!signedBy(wallet, proof.message, proof.signature)) throw new HttpError(401, "This request was not made by this wallet.");
-  if (!(await withinLimit(`proof:${r.nonce}`, 1, Math.ceil((2 * REQUEST_WINDOW_MS) / 1000)))) {
+  const nonceResult = await consumeNonce(`proof:${r.nonce}`, Math.ceil((2 * REQUEST_WINDOW_MS) / 1000));
+  if (nonceResult === "unavailable") throw new HttpError(503, "Can't verify this request right now. Try again in a minute.");
+  if (nonceResult === "used") {
     throw new HttpError(409, "That request was already used. Try again.");
   }
 }
@@ -406,7 +408,9 @@ export function endpoint(
         return json({ error: "only the room server may call this" }, 403);
       }
       // Spent once, kept past the window it could be replayed in.
-      if (!(await withinLimit(`nonce:${nonce}`, 1, Math.ceil((2 * SIGNATURE_WINDOW_MS) / 1000)))) {
+      const nonceResult = await consumeNonce(`nonce:${nonce}`, Math.ceil((2 * SIGNATURE_WINDOW_MS) / 1000));
+      if (nonceResult === "unavailable") return json({ error: "request verification is temporarily unavailable" }, 503);
+      if (nonceResult === "used") {
         return json({ error: "this request was already used" }, 409);
       }
     }

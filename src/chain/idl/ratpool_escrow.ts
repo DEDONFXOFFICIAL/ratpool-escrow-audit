@@ -815,6 +815,10 @@ export type RatpoolEscrow = {
         {
           "name": "id",
           "type": "u64"
+        },
+        {
+          "name": "expectedEntry",
+          "type": "u64"
         }
       ]
     },
@@ -1891,6 +1895,11 @@ export type RatpoolEscrow = {
       "code": 6033,
       "name": "notUsualAccount",
       "msg": "Prizes and refunds go only to the wallet's usual token account"
+    },
+    {
+      "code": 6034,
+      "name": "entryChanged",
+      "msg": "The pool entry changed; approve the displayed amount again"
     }
   ],
   "types": [

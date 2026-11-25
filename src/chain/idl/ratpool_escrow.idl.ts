@@ -815,6 +815,10 @@ const IDL = {
         {
           "name": "id",
           "type": "u64"
+        },
+        {
+          "name": "expected_entry",
+          "type": "u64"
         }
       ]
     },
@@ -1891,6 +1895,11 @@ const IDL = {
       "code": 6033,
       "name": "NotUsualAccount",
       "msg": "Prizes and refunds go only to the wallet's usual token account"
+    },
+    {
+      "code": 6034,
+      "name": "EntryChanged",
+      "msg": "The pool entry changed; approve the displayed amount again"
     }
   ],
   "types": [

@@ -6,10 +6,9 @@
  * particular about what it can load (see _lib.ts), and three verbs over
  * fetch are all this needs.
  *
- * Every call here is best-effort and never throws. The chain is the source
- * of truth for money and the escrow must never wait on, or fail because of,
- * a record. A write that fails is logged with enough to redo it by hand;
- * the settle that produced it has already happened.
+ * Result/profile records are best-effort: the chain is the source of truth
+ * for money. Security decisions are different: nonces and shared spending
+ * reservations must refuse a request when the database cannot answer.
  *
  * Unconfigured is a legal state: no SUPABASE_URL, no writes. Limits warn once.
  */
@@ -18,6 +17,33 @@ const URL_ = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 export const DB_ENABLED = !!(URL_ && KEY);
+
+/** An authenticated RPC. Security decisions must treat null as unavailable. */
+export async function dbRpc<T>(name: string, args: Record<string, unknown>): Promise<T | null> {
+  if (!DB_ENABLED) return null;
+  try {
+    const res = await fetch(`${URL_}/rest/v1/rpc/${name}`, {
+      method: "POST",
+      headers: { apikey: KEY!, authorization: `Bearer ${KEY}`, "content-type": "application/json" },
+      body: JSON.stringify(args),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) {
+      console.error(`[db] ${name} unavailable (${res.status})`);
+      return null;
+    }
+    return await res.json() as T;
+  } catch {
+    console.error(`[db] ${name} unavailable`);
+    return null;
+  }
+}
+
+/** Never fall back to instance memory for an exactly-once signature nonce. */
+export async function consumeNonce(key: string, windowSeconds: number): Promise<"ok" | "used" | "unavailable"> {
+  const result = await dbRpc<unknown>("bump_limit", { k: key, max_count: 1, window_seconds: windowSeconds });
+  return result === true ? "ok" : result === false ? "used" : "unavailable";
+}
 
 let warnedLimitUnavailable = false;
 

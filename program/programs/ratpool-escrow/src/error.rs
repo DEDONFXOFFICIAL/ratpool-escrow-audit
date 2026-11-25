@@ -70,4 +70,6 @@ pub enum EscrowError {
     TooSoon,
     #[msg("Prizes and refunds go only to the wallet's usual token account")]
     NotUsualAccount,
+    #[msg("The pool entry changed; approve the displayed amount again")]
+    EntryChanged,
 }

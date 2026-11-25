@@ -349,22 +349,23 @@ export class ChainEconomy implements EconomyService {
     admit?: { exp: number; sig: string } | null,
     tier?: PriceTier,
   ): Promise<string> {
+    if (action === "join" && !tier) throw new TxRefused("the pool entry is missing");
+    const entry = tier ? toBaseUnits(tier.entry) : undefined;
     const r = await post<SponsoredTx>("/api/match/sponsor", {
       id: id.toString(),
       player: this.owner.toBase58(),
       action,
+      ...(action === "join" ? { entry: entry!.toString() } : {}),
       // The room's ticket for this seat: the sponsor co-signs a join only with it.
       ...(admit ? { admitExp: admit.exp, admitSig: admit.sig } : {}),
       // A leave is signed by the wallet itself (walletRequest.ts).
       ...(action === "leave" ? { proof: await this.prove("leave", leaveDetail(id)) } : {}),
     });
     const tx = Transaction.from(Uint8Array.from(atob(r.tx), (c) => c.charCodeAt(0)));
-    checkEscrowTx(tx, { action, id, owner: this.owner, ownerAta: this.ata() });
-    // A join approves whatever entry the match holds when it lands, and names
-    // only the match: read again now, after the server answered, so a match
-    // replaced under the same id while the request was out is refused here
-    // (outside review, 2026-10-14). The escrow upgrade before mainnet puts
-    // the entry in the join itself.
+    const want = { id, owner: this.owner, ownerAta: this.ata() };
+    checkEscrowTx(tx, action === "join" ? { ...want, action, entry: entry! } : { ...want, action });
+    // This read gives an early explanation; the signed entry is also
+    // enforced by the program if the match changes after this read.
     if (action === "join" && tier) await this.requireEntry(id, tier);
     return this.send(tx, r);
   }

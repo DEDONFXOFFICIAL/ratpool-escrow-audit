@@ -12,7 +12,18 @@ program on Solana: 50/30/20 of what is left after the fee (10% in the
 deployed configuration; fewer than three stakers share the same total). It
 runs on devnet.
 
-Snapshot: see `EXPORT.txt` for the source commit and date.
+Snapshot: see `EXPORT.txt` for the full source commit and date, and
+`EXPORT-MANIFEST.json` for each exported file's SHA-256. The private project is
+the source of truth; this repository is its curated review copy, not a separate
+escrow implementation. Only committed source is exported, never local settings
+or unpublished branch changes.
+
+The current contract interface is devnet v5: `join(id, expected_entry)`.
+See `program/UPGRADE-v5.md` for the tested build hash and compatibility change.
+The v5 binary passed all 78 contract tests and was verified against the deployed
+devnet executable on 24 November 2026. This is test evidence, not independent
+auditor certification. Source in this extract may include historical migrations;
+their presence does not establish which migrations a hosted database has run.
 
 ## What is here
 
@@ -31,7 +42,9 @@ Snapshot: see `EXPORT.txt` for the source commit and date.
 1. **Open.** The site creates a match account and its vault, pinning the
    entry, the fee, the fee destination, the minimum players and the refund
    delay.
-2. **Join.** A player seated in a room approves exactly one entry from their
+2. **Join.** A player seated in a room signs the exact displayed entry amount.
+   The contract requires it to match the pool entry before approving that
+   amount from their
    own USDC account to the match (an SPL approve; nothing moves). The
    platform co-signs as admission, only for players the game server seated.
 3. **Collect and start.** When the room locks, approved stakes move into the
@@ -50,16 +63,16 @@ Snapshot: see `EXPORT.txt` for the source commit and date.
 Players never pay network fees: the platform is the fee payer on every
 transaction. Before the player's wallet signs, the client checks the
 transaction (`src/economy/txCheck.ts`): for a join or leave, one escrow
-instruction for that match and the player's own account (the approved amount
-is the entry pinned in the match on chain, which the client also reads before
-staking); for a send or purchase, exactly one transfer of the asked amount
+instruction for that match and the player's own account, with the exact
+expected entry amount embedded in a join; for a send or purchase, exactly one transfer of the asked amount
 to the asked destination from the player's own account; for an invite
 record, only the player's own record. Requests made in a player's name
 (sends, purchases, leaving a pool, the faucet) are signed by that player's
 wallet with a nonce the site spends once (`src/chain/walletRequest.ts`,
-`api/_lib.ts`); when the database is unreachable the site falls back to a
-per-instance memory of spent nonces, so a replay is then possible against
-another instance within the request's validity window.
+`api/_lib.ts`). Signed wallet and room requests require a shared database nonce
+check. When it is unavailable they are refused temporarily; there is no
+per-instance memory fallback for those nonces. Ordinary request limits have
+separate fallback behavior in `api/_db.ts`.
 
 ## Keys and roles
 
@@ -80,6 +93,10 @@ another instance within the request's validity window.
 - The upgrade authority is a single offline key on devnet; a multisig will
   hold it before mainnet.
 - The test USDC mint's authorities are the platform's (devnet only).
+- Shared SOL spending reservations remain a separate draft change and are not
+  active in this released snapshot. Request limits and balance checks are not
+  a global reservation ledger. Independent audit and mainnet release controls
+  remain outstanding.
 - The game server's match logic, its player sign-in and its cheat detection
   are not in this extract; ask for private access to review them.
 - The refund sweep runs from the game server's schedule (not included); the

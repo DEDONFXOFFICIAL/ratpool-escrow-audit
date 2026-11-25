@@ -29,17 +29,19 @@ function notPaidBy(tx: Transaction, owner: PublicKey) {
 /** The player's join or leave: one escrow instruction, this match, this player. */
 export function checkEscrowTx(
   tx: Transaction,
-  want: { action: "join" | "leave"; id: bigint; owner: PublicKey; ownerAta: PublicKey },
+  want: { id: bigint; owner: PublicKey; ownerAta: PublicKey } &
+    ({ action: "join"; entry: bigint } | { action: "leave" }),
 ): void {
   notPaidBy(tx, want.owner);
   if (tx.instructions.length !== 1) throw new TxRefused(`${tx.instructions.length} instructions`);
   const ix = tx.instructions[0];
   if (!ix.programId.equals(PROGRAM_ID)) throw new TxRefused("not the escrow program");
-  // The instruction's tag from the IDL, then its one argument, the match id (u64, little endian).
+  // A join signs both match id and entry; a leave signs only the match id.
   const tag = IDL.instructions.find((i) => i.name === want.action)?.discriminator;
   const data = Buffer.from(ix.data);
-  if (!tag || data.length !== 16 || !data.subarray(0, 8).equals(Buffer.from(tag))) throw new TxRefused(`not a ${want.action}`);
+  if (!tag || data.length !== (want.action === "join" ? 24 : 16) || !data.subarray(0, 8).equals(Buffer.from(tag))) throw new TxRefused(`not a ${want.action}`);
   if (data.readBigUInt64LE(8) !== want.id) throw new TxRefused("another match");
+  if (want.action === "join" && (want.entry <= 0n || data.readBigUInt64LE(16) !== want.entry)) throw new TxRefused("another entry amount");
   const has = (k: PublicKey, signer?: boolean) => ix.keys.some((a) => a.pubkey.equals(k) && (!signer || a.isSigner));
   if (!has(matchPda(want.id))) throw new TxRefused("another match account");
   if (!has(want.owner, true) || !has(want.ownerAta)) throw new TxRefused("not the player's account");

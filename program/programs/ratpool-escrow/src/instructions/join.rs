@@ -39,11 +39,14 @@ pub struct Leave<'info> {
 }
 
 /// The embedded wallet approves one entry automatically; nothing moves yet.
-pub fn handle_join(ctx: Context<Join>, id: u64) -> Result<()> {
+pub fn handle_join(ctx: Context<Join>, id: u64, expected_entry: u64) -> Result<()> {
     let player = ctx.accounts.player.key();
     {
         let m = &ctx.accounts.match_account;
         require!(m.state == MatchState::Open, EscrowError::MatchNotOpen);
+        // The amount is in the player's signed instruction, not just a
+        // client-side read that can become stale before execution.
+        require!(expected_entry == m.entry, EscrowError::EntryChanged);
         require!(
             m.players.len() < MAX_PLAYERS as usize,
             EscrowError::MatchFull

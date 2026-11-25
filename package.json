@@ -11,6 +11,9 @@
     "typecheck": "tsc -b --noEmit",
     "check:level": "node --experimental-strip-types scripts/check-level.mjs",
     "check": "tsc -b --noEmit && tsc -p api --noEmit && npm run check:level",
+    "test:controls": "node scripts/test-arena-controls.mjs",
+    "test:payment-safety": "node scripts/test-payment-safety.mjs",
+    "test:controller-menus": "node scripts/test-controller-menus.mjs",
     "smoke": "node scripts/smoke.mjs",
     "smoke:desktop": "node scripts/smoke.mjs --desktop-only",
     "figures": "node scripts/figures.mjs",
@@ -73,7 +76,10 @@
       "lodash": "^4.18.0",
       "ws@8": "^8.21.0",
       "shell-quote": "^1.11.0",
-      "source-map-js": ">=1.2.2"
+      "source-map-js": ">=1.2.2",
+      "follow-redirects@1": "1.16.2",
+      "undici@6": "6.29.1",
+      "hono@4": "4.13.13"
     }
   }
 }

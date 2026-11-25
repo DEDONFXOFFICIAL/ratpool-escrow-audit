@@ -31,6 +31,13 @@ export const POST = endpoint(async (body, req) => {
   requireOutsideWallet(player);
   const action = body.action;
   if (action !== "join" && action !== "leave") throw new HttpError(400, "action must be join or leave");
+  let expectedEntry = 0n;
+  if (action === "join") {
+    if (body.entry === undefined) throw new HttpError(426, "Update RatPool to approve the pool entry.");
+    if (typeof body.entry !== "string" || !/^[0-9]{1,20}$/.test(body.entry)) throw new HttpError(400, "bad entry amount");
+    expectedEntry = BigInt(body.entry);
+    if (expectedEntry <= 0n || expectedEntry > 18_446_744_073_709_551_615n) throw new HttpError(400, "bad entry amount");
+  }
 
   // A seat on chain only for a seat in the room: the program now needs the
   // sponsor's signature on every join (escrow v2), and the sponsor gives it
@@ -88,6 +95,7 @@ export const POST = endpoint(async (body, req) => {
   if (action === "join") {
     const m = await p.account.match.fetchNullable(matchPda(id));
     if (!m || enumKey(m.state) !== "open") throw new HttpError(409, "This pool is no longer open.");
+    if (BigInt(m.entry.toString()) !== expectedEntry) throw new HttpError(409, "The pool entry changed. Rejoin to approve its current price.");
     if (m.players.some((pl) => pl.key.equals(player) && enumKey(pl.status) === "joined")) throw new HttpError(409, "Already in this pool.");
     const src = await getAccount(conn, ata(player)).catch(() => null);
     if (!src || !src.owner.equals(player) || src.isFrozen || src.amount < BigInt(m.entry.toString())) {
@@ -104,7 +112,7 @@ export const POST = endpoint(async (body, req) => {
   const accounts = { playerAta: ata(player), player, tokenProgram: TOKEN_PROGRAM_ID };
   const ix =
     action === "join"
-      ? await p.methods.join(toBn(id)).accountsPartial({ ...accounts, admission: payer.publicKey }).instruction()
+      ? await p.methods.join(toBn(id), toBn(expectedEntry)).accountsPartial({ ...accounts, admission: payer.publicKey }).instruction()
       : await p.methods.leave(toBn(id)).accountsPartial(accounts).instruction();
 
   const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash("confirmed");

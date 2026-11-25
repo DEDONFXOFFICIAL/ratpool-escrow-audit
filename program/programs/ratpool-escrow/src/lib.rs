@@ -83,8 +83,8 @@ pub mod ratpool_escrow {
         instructions::create_match::handle_create_match(ctx, id, entry)
     }
 
-    pub fn join(ctx: Context<Join>, id: u64) -> Result<()> {
-        instructions::join::handle_join(ctx, id)
+    pub fn join(ctx: Context<Join>, id: u64, expected_entry: u64) -> Result<()> {
+        instructions::join::handle_join(ctx, id, expected_entry)
     }
 
     pub fn leave(ctx: Context<Leave>, id: u64) -> Result<()> {

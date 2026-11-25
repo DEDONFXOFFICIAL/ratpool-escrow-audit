@@ -498,8 +498,13 @@ impl World {
     }
 
     fn join(&mut self, id: u64, player: &Keypair, ata: &Pubkey) -> Result<(), String> {
+        let expected_entry = self.get_match(id).map(|m| m.entry).unwrap_or(ENTRY);
+        self.join_expected(id, player, ata, expected_entry)
+    }
+
+    fn join_expected(&mut self, id: u64, player: &Keypair, ata: &Pubkey, expected_entry: u64) -> Result<(), String> {
         let ix = self.ix(
-            ratpool_escrow::instruction::Join { id }.data(),
+            ratpool_escrow::instruction::Join { id, expected_entry }.data(),
             self.join_metas(id, &player.pubkey(), ata),
         );
         let admission = self.admission.insecure_clone();
@@ -509,7 +514,8 @@ impl World {
     fn join_without_admission(&mut self, id: u64, player: &Keypair, ata: &Pubkey) -> Result<(), String> {
         let mut metas = self.join_metas(id, &player.pubkey(), ata);
         metas.iter_mut().find(|m| m.pubkey == self.admission.pubkey()).unwrap().is_signer = false;
-        let ix = self.ix(ratpool_escrow::instruction::Join { id }.data(), metas);
+        let expected_entry = self.get_match(id).map(|m| m.entry).unwrap_or(ENTRY);
+        let ix = self.ix(ratpool_escrow::instruction::Join { id, expected_entry }.data(), metas);
         self.send(ix, &[player])
     }
 
@@ -1674,6 +1680,80 @@ fn stale_delegate_cannot_spend_a_reused_id_without_fresh_join() {
 }
 
 #[test]
+fn join_approves_only_the_entry_the_player_signed() {
+    let mut w = World::new();
+    w.initialize(1).unwrap();
+    w.create_match(901, USDC).unwrap();
+    let (player, ata) = w.player(100 * USDC);
+    for expected in [0, ENTRY, USDC - 1, USDC + 1, 50 * USDC, u64::MAX] {
+        expect_err(w.join_expected(901, &player, &ata, expected), "EntryChanged");
+        assert_eq!(w.delegate(&ata), None);
+        assert!(w.get_match(901).unwrap().players.is_empty());
+        assert_eq!(w.balance(&ata), 100 * USDC);
+    }
+    w.join_expected(901, &player, &ata, USDC).unwrap();
+    assert_eq!(w.delegate(&ata), Some((w.match_pda(901), USDC)));
+    assert_eq!(w.balance(&ata), 100 * USDC);
+}
+
+#[test]
+fn a_pending_join_cannot_approve_a_repriced_recreated_match() {
+    for next_entry in [ENTRY, 10 * USDC] {
+        let mut w = World::new();
+        w.initialize(1).unwrap();
+        w.create_match(902, USDC).unwrap();
+        let (player, ata) = w.player(100 * USDC);
+        let signed_instruction = w.ix(
+            ratpool_escrow::instruction::Join { id: 902, expected_entry: USDC }.data(),
+            w.join_metas(902, &player.pubkey(), &ata),
+        );
+        w.cancel(902).unwrap();
+        w.close_match(902).unwrap();
+        w.create_match(902, next_entry).unwrap();
+        let admission = w.admission.insecure_clone();
+        expect_err(w.send(signed_instruction, &[&admission, &player]), "EntryChanged");
+        assert_eq!(w.delegate(&ata), None);
+        assert_eq!(w.balance(&ata), 100 * USDC);
+        assert!(w.get_match(902).unwrap().players.is_empty());
+    }
+}
+
+#[test]
+fn a_legacy_join_without_an_entry_is_refused() {
+    let mut w = World::new();
+    w.initialize(1).unwrap();
+    w.create_match(903, USDC).unwrap();
+    let (player, ata) = w.player(100 * USDC);
+    let mut old_data = ratpool_escrow::instruction::Join { id: 903, expected_entry: USDC }.data();
+    old_data.truncate(16);
+    let ix = w.ix(old_data, w.join_metas(903, &player.pubkey(), &ata));
+    let admission = w.admission.insecure_clone();
+    expect_err(w.send(ix, &[&admission, &player]), "InstructionDidNotDeserialize");
+    assert_eq!(w.delegate(&ata), None);
+    assert!(w.get_match(903).unwrap().players.is_empty());
+}
+
+#[test]
+fn every_current_pool_approves_its_exact_entry() {
+    let mut w = World::new();
+    w.initialize(1).unwrap();
+    for (i, entry) in [USDC, 10 * USDC, 20 * USDC, 50 * USDC].into_iter().enumerate() {
+        let id = 904 + i as u64;
+        w.create_match(id, entry).unwrap();
+        let (player, ata) = w.player(100 * USDC);
+        w.join_expected(id, &player, &ata, entry).unwrap();
+        assert_eq!(w.delegate(&ata), Some((w.match_pda(id), entry)));
+        assert_eq!(w.balance(&ata), 100 * USDC);
+    }
+}
+
+#[test]
+fn match_account_fits_the_sponsorship_rent_ceiling() {
+    use anchor_lang::Space;
+    assert!(8 + Match::INIT_SPACE <= 4096);
+}
+
+#[test]
 fn refunds_enforce_owner_and_exactly_one_payment() {
     let mut w = World::new();
     w.initialize(1).unwrap();
@@ -1716,7 +1796,7 @@ fn wrong_match_and_vault_substitution_are_rejected() {
     let mut metas = w.join_metas(48, &player.pubkey(), &ata);
     let index = metas.iter().position(|m| m.pubkey == w.match_pda(48)).unwrap();
     metas[index].pubkey = w.match_pda(49);
-    let ix = w.ix(ratpool_escrow::instruction::Join { id: 48 }.data(), metas);
+    let ix = w.ix(ratpool_escrow::instruction::Join { id: 48, expected_entry: ENTRY }.data(), metas);
     let admission = w.admission.insecure_clone();
     expect_err(w.send(ix, &[&admission, &player]), "ConstraintSeeds");
     w.join(48, &player, &ata).unwrap();
@@ -1898,7 +1978,7 @@ fn admission_rotation_is_enforced_and_emits_the_new_config() {
     let (next_admission, _) = w.player(0);
     let mut wrong = w.join_metas(57, &player.pubkey(), &ata);
     wrong.iter_mut().find(|m| m.pubkey == w.admission.pubkey()).unwrap().pubkey = next_admission.pubkey();
-    let ix = w.ix(ratpool_escrow::instruction::Join { id: 57 }.data(), wrong);
+    let ix = w.ix(ratpool_escrow::instruction::Join { id: 57, expected_entry: ENTRY }.data(), wrong);
     expect_err(w.send(ix, &[&next_admission, &player]), "WrongAdmission");
     let previous_authority = w.authority.pubkey();
     w.update_terms(None, None, None, Some(next_admission.pubkey())).unwrap();
@@ -1999,7 +2079,7 @@ fn v2_seeds_isolate_legacy_config_and_match_accounts() {
     for (expected, replacement) in [(w.config, legacy_config), (w.match_pda(61), legacy_match)] {
         let mut metas = w.join_metas(61, &player.pubkey(), &ata);
         metas.iter_mut().find(|m| m.pubkey == expected).unwrap().pubkey = replacement;
-        let ix = w.ix(ratpool_escrow::instruction::Join { id: 61 }.data(), metas);
+        let ix = w.ix(ratpool_escrow::instruction::Join { id: 61, expected_entry: ENTRY }.data(), metas);
         expect_err(w.send(ix, &[&admission, &player]), "ConstraintSeeds");
     }
     assert!(w.get_match(61).unwrap().players.is_empty());
