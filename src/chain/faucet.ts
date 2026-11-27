@@ -10,8 +10,8 @@ import { FAUCET_DETAIL, proveWalletRequest } from "./walletRequest";
  */
 export const FAUCET_AVAILABLE = CLUSTER !== "mainnet-beta";
 
-/** What one claim is worth. Kept in step with api/faucet.ts. */
-export const FAUCET_CLAIM = 2;
+/** The same amount used by the server's actual SPL mint instruction. */
+export { FAUCET_CLAIM } from "./faucetRules";
 
 /** Asked for in the wallet's own name: it signs the request, silently (walletRequest.ts). */
 export async function claimTestUsdc(
@@ -28,5 +28,9 @@ export async function claimTestUsdc(
     | { signature?: string; balance?: number; error?: string }
     | null;
   if (!res.ok) throw new Error(data?.error ?? `The faucet is not answering (${res.status})`);
-  return { signature: data?.signature ?? "", balance: data?.balance ?? 0 };
+  if (!data || typeof data.signature !== "string" || !/^[1-9A-HJ-NP-Za-km-z]{64,90}$/.test(data.signature) ||
+      typeof data.balance !== "number" || !Number.isFinite(data.balance) || data.balance < 0) {
+    throw new Error("The claim receipt is unavailable. Check your wallet balance before retrying.");
+  }
+  return { signature: data.signature, balance: data.balance };
 }

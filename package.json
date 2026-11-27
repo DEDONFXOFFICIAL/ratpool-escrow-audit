@@ -18,6 +18,7 @@
     "test:leaderboards": "node scripts/test-leaderboards.mjs",
     "test:economy-sql": "node scripts/test-economy-v6-sql.mjs",
     "test:refund-layout": "node scripts/test-refund-layout.mjs",
+    "test:faucet": "node scripts/test-faucet.mjs",
     "test:leaderboards:ui": "node scripts/test-leaderboard-ui.mjs",
     "test:updates": "node scripts/test-app-updates.mjs",
     "test:referrals": "node scripts/test-referrals.mjs",

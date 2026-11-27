@@ -1,5 +1,5 @@
 {
-  "source_commit": "679176a4405f924ececea3fdf6a1adc2606ee701",
+  "source_commit": "d2c69189ddfc14fb13af3cb373e4939ad1575741",
   "extracted_date": "2026-11-27",
   "timezone": "Africa/Lagos",
   "files": [
@@ -49,7 +49,7 @@
     },
     {
       "path": "api/faucet.ts",
-      "sha256": "1eb22b349b0206b7316c8a255f46363e3925caef89b42a292cb6ddc50722ede7"
+      "sha256": "d03a933b671a4104a7d2a37efa4891872382136d1f1098e56a874362d6f6deda"
     },
     {
       "path": "api/match/abandon.ts",
@@ -81,7 +81,7 @@
     },
     {
       "path": "api/profile.ts",
-      "sha256": "7609edc067d0359a7eceea8dda461de9eb3a9dea0ccc5933aa9e5c08fd7a7140"
+      "sha256": "74bd44447a0e8f8f441694529c6eafa107e2aef504b128d93969ae0f7a099b70"
     },
     {
       "path": "api/store/buy.ts",
@@ -101,7 +101,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "28af2571b920a87c73b255a4511cf5aec2569690b71dc71184d7186afb38a555"
+      "sha256": "291f1c179d515fdb02df1d92d907ad4b465450969843a04da5d33e39c3f0f27f"
     },
     {
       "path": "pnpm-lock.yaml",
@@ -265,7 +265,11 @@
     },
     {
       "path": "src/chain/faucet.ts",
-      "sha256": "bd152c3b082d7591e5bacb291fb726d9d1189ca5607e1e18b0e1daa3790bdf2a"
+      "sha256": "5a740cbdaa37b37ef2ef41f8b34c7f4d688f4c45487d4d9ba864a77b92d49d6e"
+    },
+    {
+      "path": "src/chain/faucetRules.ts",
+      "sha256": "820e01ca8001b2b1fe4bbb7b50c1e169d7cc4c94e186fe4a9fadf38f3e96fc5b"
     },
     {
       "path": "src/chain/idl/ratpool_escrow.idl.ts",

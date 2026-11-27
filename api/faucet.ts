@@ -2,18 +2,14 @@ import { getAccount, getOrCreateAssociatedTokenAccount, mintTo } from "@solana/s
 import { withinLimit, withinSharedLimit } from "./_db.js";
 import { requireFeeFunds, preflight, ata, authority, connection, endpoint, faucetAuthority, HttpError, ipKey, mint, parsePubkey, requireWalletProof, USDC_DECIMALS } from "./_lib.js";
 import { FAUCET_DETAIL } from "../src/chain/walletRequest.js";
-
-/** What one claim is worth, in USDC. Round 16: "let's say $2". */
-const CLAIM = 2;
-/** A wallet still holding this much is not given more. */
-const REFILL_BELOW = 2;
+import { FAUCET_CLAIM as CLAIM, FAUCET_REFILL_BELOW as REFILL_BELOW } from "../src/chain/faucetRules.js";
 
 /**
  * POST /api/faucet  { wallet, proof }  →  { signature, balance }
  *
  * Test USDC for testers, inside the app. Claim limits keep repeated requests
- * from draining the platform. A wallet with two or more still gets nothing.
- * Only devnet may mint; an unset cluster allows local development.
+ * from draining the platform's SOL. Eligibility follows the shared refill
+ * threshold. Only an explicitly configured devnet environment may mint.
  */
 /** Devnet confirmations can crawl; a function cut off mid-transaction is the worst outcome. */
 export const maxDuration = 60;

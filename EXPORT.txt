@@ -1,2 +1,2 @@
-Extracted from the private RatPool repository at commit 679176a4405f924ececea3fdf6a1adc2606ee701 on 2026-11-27.
+Extracted from the private RatPool repository at commit d2c69189ddfc14fb13af3cb373e4939ad1575741 on 2026-11-27.
 Committed files only; see EXPORT-MANIFEST.json for per-file SHA-256 hashes.

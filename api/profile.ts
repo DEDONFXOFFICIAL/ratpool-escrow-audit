@@ -3,6 +3,7 @@ import { DB_ENABLED, dbInsertNew, dbPatchCount, dbSelect, withinLimit } from "./
 import { readAccountState, saveAccountState } from "./_account.js";
 import { isReferralMessage, referralMessage, verifyReferral } from "./_referral.js";
 import { freePlayMessage } from "./_freeplay.js";
+import { FAUCET_CLAIM, FAUCET_REFILL_BELOW } from "../src/chain/faucetRules.js";
 
 /**
  * POST /api/profile  { message, signature }  →  { ok }
@@ -124,6 +125,7 @@ export const POST = endpoint(async (body, req) => {
 export const OPTIONS = preflight;
 
 /** Public cutover status; no account information or secret configuration. */
-export const GET = async () => Response.json({ paidPoolsPaused: process.env.PAID_POOLS_PAUSED === "1", economyVersion: 6 }, {
+export const GET = async () => Response.json({ paidPoolsPaused: process.env.PAID_POOLS_PAUSED === "1", economyVersion: 6,
+  faucetClaim: FAUCET_CLAIM, faucetRefillBelow: FAUCET_REFILL_BELOW }, {
   headers: { "cache-control": "no-store", "access-control-allow-origin": "*" },
 });
