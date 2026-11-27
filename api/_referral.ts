@@ -8,12 +8,10 @@ import { configPda, guardPda, ownedByEscrow, referralPda } from "../src/chain/es
  * POST /api/profile with a referral message  →  see below  (routed by
  * api/profile.ts; a function of its own would pass the plan's limit of twelve)
  *
- * Referrals: who brought whom. Nothing here moves money: the reward, 1% of a
- * pool shared by the podium players' referrers, is paid by the escrow program
- * at settlement (api/match/settle.ts) and recorded in referral_earnings. The
- * tables are in supabase/2026-09-29-limits-and-referrals.sql and
- * 2026-09-30-earnings-purchases-privacy.sql; a browser can neither read nor
- * write them.
+ * Direct referrals: immutable first attribution, verified when a profile is
+ * saved. New qualifying results earn points through the service-only SQL
+ * ledger; no cash is paid. Historical referral_earnings remain readable to
+ * this service for account history. Browsers cannot write attribution.
  *
  * Two messages, each signed by the wallet it names (the proof the profile
  * already uses, silent with the in-app wallet):
@@ -118,6 +116,11 @@ async function myReferral(w: string, req?: Request) {
     (await dbSelect<{ match_id: string; amount: number; created_at: string }>(
       `referral_earnings?referrer_wallet=eq.${w}&select=match_id,amount,created_at&order=created_at.desc&limit=30`,
     )) ?? [];
+  const pointRows = await dbSelect<{ points: number }>(
+    `referral_points_totals?network=eq.${process.env.SOLANA_CLUSTER || process.env.VITE_SOLANA_CLUSTER || "devnet"}&wallet=eq.${w}&select=points&limit=1`,
+  );
+  if (!pointRows) throw busy();
+  const points = Number(pointRows[0]?.points ?? 0);
   const earned = +Number(totals[0]?.earned ?? 0).toFixed(6);
   // The last few, by the name of their rat where they have one.
   const recent = rows;
@@ -132,6 +135,7 @@ async function myReferral(w: string, req?: Request) {
     invited: Number(totals[0]?.invited ?? 0),
     verified: Number(totals[0]?.joined ?? 0),
     earned,
+    points,
     // Each payout on its own, for the player's history.
     rewards: earnedRows.map((r, i) => ({
       id: `${r.match_id}:${i}`,

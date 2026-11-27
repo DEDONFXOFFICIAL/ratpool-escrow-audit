@@ -22,8 +22,8 @@ export const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9
 
 // Version 2 of the program (program/MIGRATION-v2.md): new seeds, so an
 // account in the old layout is never read as a new one.
-const CONFIG_SEED = Buffer.from("config_v2");
-const MATCH_SEED = Buffer.from("match_v2");
+const CONFIG_SEED = Buffer.from("config_v6");
+const MATCH_SEED = Buffer.from("match_v6");
 const VAULT_SEED = Buffer.from("vault");
 
 /** A u64 as the eight little-endian bytes the program seeds a match with. */

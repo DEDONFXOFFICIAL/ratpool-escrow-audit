@@ -116,9 +116,9 @@ export function addressBytes(s: string): Uint8Array {
 }
 
 /** What a signed ranking starts with (program/.../constants.rs SETTLE_DOMAIN). */
-const SETTLE_DOMAIN = "ratpool-settle-v1";
+const SETTLE_DOMAIN = "ratpool-settle-v6";
 /** Wallets in a signed ranking: the program takes no more (MAX_SIGNED_RANKING). */
-const SIGNED_RANKING = 6;
+const SIGNED_RANKING = 12;
 
 /**
  * The finishing order, signed for the escrow itself: SETTLE_DOMAIN, the
@@ -134,12 +134,14 @@ export async function signSettlement(
   matchId: string,
   startedAt: number,
   ranking: string[],
+  winnerCount = 7,
 ): Promise<{ message: string; signature: string } | null> {
   try {
     const key = signingKey(env);
     const program = env.ESCROW_PROGRAM?.trim();
     if (!key || !program) return null;
-    const wallets = [...new Set(ranking)].slice(0, SIGNED_RANKING).map(addressBytes);
+    if (!Number.isInteger(winnerCount) || winnerCount < 1 || winnerCount > SIGNED_RANKING) return null;
+    const wallets = [...new Set(ranking)].slice(0, winnerCount).map(addressBytes);
     if (!wallets.length) return null;
     const domain = new TextEncoder().encode(SETTLE_DOMAIN);
     if (!Number.isSafeInteger(startedAt) || startedAt <= 0) return null;

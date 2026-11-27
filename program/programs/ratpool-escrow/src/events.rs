@@ -1,6 +1,12 @@
 use anchor_lang::prelude::*;
 
 #[event]
+pub struct PayoutPolicyUpdated {
+    pub winner_count: u8,
+    pub weights: Vec<u16>,
+}
+
+#[event]
 pub struct ConfigInitialized {
     pub authority: Pubkey,
     pub admission: Pubkey,
@@ -92,6 +98,9 @@ pub struct MatchSettled {
     /// For each referrer, the winner whose invite it was (escrow v4; last, so
     /// a reader of the older receipt still reads everything before it).
     pub referred: Vec<Pubkey>,
+    pub economy_version: u8,
+    pub winner_weights: Vec<u16>,
+    pub collected_at: i64,
 }
 
 #[event]

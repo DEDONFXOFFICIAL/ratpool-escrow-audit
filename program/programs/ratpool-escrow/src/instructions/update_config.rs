@@ -60,3 +60,17 @@ pub fn handle_update_config(
     });
     Ok(())
 }
+
+/// Upgrade-authority-controlled policy for future matches. Existing matches
+/// retain the count and weights copied into their own account at creation.
+pub fn handle_update_payout_policy(ctx: Context<UpdateConfig>, weights: Vec<u16>) -> Result<()> {
+    require!(!weights.is_empty() && weights.len() <= MAX_WINNERS, EscrowError::BadPayoutPolicy);
+    require!(weights.iter().all(|weight| *weight > 0), EscrowError::BadPayoutPolicy);
+    require!(weights.windows(2).all(|pair| pair[0] >= pair[1]), EscrowError::BadPayoutPolicy);
+    let c = &mut ctx.accounts.config;
+    c.winner_count = weights.len() as u8;
+    c.winner_weights = [0; MAX_WINNERS];
+    c.winner_weights[..weights.len()].copy_from_slice(&weights);
+    emit!(crate::events::PayoutPolicyUpdated { winner_count: c.winner_count, weights });
+    Ok(())
+}

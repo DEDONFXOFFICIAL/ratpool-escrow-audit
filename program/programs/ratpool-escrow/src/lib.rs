@@ -75,6 +75,10 @@ pub mod ratpool_escrow {
         instructions::authority::handle_propose_authority(ctx, new)
     }
 
+    pub fn update_payout_policy(ctx: Context<UpdateConfig>, weights: Vec<u16>) -> Result<()> {
+        instructions::update_config::handle_update_payout_policy(ctx, weights)
+    }
+
     pub fn accept_authority(ctx: Context<AcceptAuthority>) -> Result<()> {
         instructions::authority::handle_accept_authority(ctx)
     }

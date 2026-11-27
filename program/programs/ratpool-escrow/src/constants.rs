@@ -1,10 +1,10 @@
 use anchor_lang::prelude::*;
 
 #[constant]
-pub const CONFIG_SEED: &[u8] = b"config_v2";
+pub const CONFIG_SEED: &[u8] = b"config_v6";
 
 #[constant]
-pub const MATCH_SEED: &[u8] = b"match_v2";
+pub const MATCH_SEED: &[u8] = b"match_v6";
 
 #[constant]
 pub const VAULT_SEED: &[u8] = b"vault";
@@ -14,13 +14,21 @@ pub const VAULT_SEED: &[u8] = b"vault";
 #[constant]
 pub const MAX_PLAYERS: u8 = 50;
 
-/// The podium split, in whole percent, first place first. Applied to the net
-/// pool (after the fee). When fewer than three stakers finish — a devnet
-/// room with one human in it — the shares that exist are scaled up to the
-/// whole pool so nothing is left in the vault. The game pays the top three
-/// (src/state/payout.ts) and starts a pool only with six stakers, so every
-/// pool it settles is exactly 50/30/20.
-pub const PODIUM_SHARES: [u64; 3] = [50, 30, 20];
+/// Default payout weights, first place first, applied to the net pool.
+/// With a 10% fee, 10/9/8/6/5/4/3 gives gross-pot shares
+/// 20/18/16/12/10/8/6%. The current game starts with at least 25
+/// actual stakers. Future policies may have up to twelve winners.
+/// Each match pins its policy at creation; updates apply to future rooms.
+/// Integer rounding remainder goes to first place.
+pub const MAX_WINNERS: usize = 12;
+pub const ECONOMY_VERSION: u8 = 6;
+pub const PODIUM_SHARES: [u16; 7] = [10, 9, 8, 6, 5, 4, 3];
+
+pub fn default_payout_weights() -> [u16; MAX_WINNERS] {
+    let mut weights = [0; MAX_WINNERS];
+    weights[..PODIUM_SHARES.len()].copy_from_slice(&PODIUM_SHARES);
+    weights
+}
 
 /// Fee ceiling, in basis points. A config that asks for more is refused; the
 /// product's own setting is in the config (1000 since 2026-10-08).
@@ -29,7 +37,7 @@ pub const MAX_FEE_BPS: u16 = 2_000;
 
 pub const BPS: u64 = 10_000;
 
-pub const REFERRAL_BPS: u64 = 100;
+// Referral rewards are backend leaderboard points; no cash referral budget.
 
 /// The room server's key, which a payout needs a signature from.
 #[constant]
@@ -46,11 +54,11 @@ pub const REFERRAL_SEED: &[u8] = b"referral";
 /// else the same key signs; the program id keeps it to this deployment; the
 /// start time keeps it to this match, never to one later opened under the
 /// same id.
-pub const SETTLE_DOMAIN: &[u8] = b"ratpool-settle-v1";
+pub const SETTLE_DOMAIN: &[u8] = b"ratpool-settle-v6";
 
 /// Wallets in a signed ranking. The podium is three; the rest stand in for a
 /// ranked wallet the chain did not collect. More would not fit a transaction.
-pub const MAX_SIGNED_RANKING: usize = 6;
+pub const MAX_SIGNED_RANKING: usize = MAX_WINNERS;
 
 /// The associated token account program. A wallet's usual token account for
 /// a mint is the one this program derives for it: the one the app shows and

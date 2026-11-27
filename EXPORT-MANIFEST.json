@@ -1,6 +1,6 @@
 {
-  "source_commit": "d65c09750316e8d3d41c198401ef319a777c2d6f",
-  "extracted_date": "2026-11-24",
+  "source_commit": "679176a4405f924ececea3fdf6a1adc2606ee701",
+  "extracted_date": "2026-11-27",
   "timezone": "Africa/Lagos",
   "files": [
     {
@@ -13,7 +13,11 @@
     },
     {
       "path": "api/_db.ts",
-      "sha256": "1c033274eb4841368fc2730fe9105294e3003a2f4d98f2c7e480d4f9ffed8b1a"
+      "sha256": "b3c4554abba4c1d4f199490cdaa4d4509791074bf3444dd14a960454f5e11eec"
+    },
+    {
+      "path": "api/_freeplay.ts",
+      "sha256": "d0873a87b541ff3a1f188ce29bb35010edfb1aa09a4c70f8f062e06e1d2b1de7"
     },
     {
       "path": "api/_ip.ts",
@@ -24,8 +28,12 @@
       "sha256": "19ff9d8b85ad330a6ac2d760ece23e462b0f98fc111f2a53e38a650de01cace4"
     },
     {
+      "path": "api/_maintenance.ts",
+      "sha256": "6ec589de8e767516aea3b3471505f1afdcd2324cce1c6596bef07d2b61df0a66"
+    },
+    {
       "path": "api/_referral.ts",
-      "sha256": "736872dc861126e8428cbecca45ab83d88272de83eb173a674c05fb9d09796c2"
+      "sha256": "7ea178cb7134d0c76495537adc0d9189b1090c1316d8cf827662b40c2da87231"
     },
     {
       "path": "api/_refund.ts",
@@ -33,7 +41,7 @@
     },
     {
       "path": "api/_settle.ts",
-      "sha256": "18b9a1e3e1cdfdd1027f65c9ec12f355b48ff036430fc6643b6021f73e096416"
+      "sha256": "4311368d5573d13293e9023d9f460562be20c63bdc54d3e896e363ba8b3f756b"
     },
     {
       "path": "api/app-auth.ts",
@@ -49,7 +57,7 @@
     },
     {
       "path": "api/match/collect.ts",
-      "sha256": "d8daf4118188caec33775b6228be6cf7fe9ff0e35c700b155ccda11b1e41ace7"
+      "sha256": "883a241c9a26c4b80fe36c6597285fbb1da3b89febfd92e86d9ff23455340540"
     },
     {
       "path": "api/match/flag.ts",
@@ -57,23 +65,23 @@
     },
     {
       "path": "api/match/open.ts",
-      "sha256": "11d42393672a782320b8575b65dca45656034a47a3e54a2baa03c678006196a6"
+      "sha256": "13e59a4916258d5ddd5f66d5f4bf7e8991943475f975c6f768faf4efdc4e39ea"
     },
     {
       "path": "api/match/settle.ts",
-      "sha256": "641bd407747beae979d4b3f8b2bbd0a2eef049fc1c64e95e3ff9ca608fa03df5"
+      "sha256": "920fed619670bf1d4ff7d906f5284fdd2ff499c55c36b987ed586b82e5353a49"
     },
     {
       "path": "api/match/sponsor.ts",
-      "sha256": "eb084e7c5e9a89e0b01a66ee359e20e7ed6c0fb5d9beb4987eb650f72795a8e0"
+      "sha256": "29e6693c0e0e14d1f4b4dad35aa64ed5c55bb658a6af3298b3c6cdf2c009a2c6"
     },
     {
       "path": "api/match/status.ts",
-      "sha256": "af930a0dd8d9a850c6790d4c27cb7380efb0b4251a70067e00c83bab8b1fb003"
+      "sha256": "777973d937ac84fb1a6ebbe66bdc18682f9e987bd29f35ad3e0771af93c09a1c"
     },
     {
       "path": "api/profile.ts",
-      "sha256": "7dda2585cb6feb0e9198df66ed2400e3fd2525172f390c66ff86661e8ac0c981"
+      "sha256": "7609edc067d0359a7eceea8dda461de9eb3a9dea0ccc5933aa9e5c08fd7a7140"
     },
     {
       "path": "api/store/buy.ts",
@@ -93,7 +101,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "676a4dadc9e6ce5aebb13ed3639fd0031f41cc069e2ecb695457597dea71c0ec"
+      "sha256": "28af2571b920a87c73b255a4511cf5aec2569690b71dc71184d7186afb38a555"
     },
     {
       "path": "pnpm-lock.yaml",
@@ -121,15 +129,15 @@
     },
     {
       "path": "program/programs/ratpool-escrow/src/constants.rs",
-      "sha256": "6de5b8c72168039dc30c85cb8ba46e687748f89e7b30c959325389e55eaad006"
+      "sha256": "263dbade3f8400b4e842d535686c6e251cdd6364f5f9694814c77efe75e53eb4"
     },
     {
       "path": "program/programs/ratpool-escrow/src/error.rs",
-      "sha256": "ce60426a27e430e7a6005419744fbdf2bba863715005b42fad38c21f10c38aa5"
+      "sha256": "01183744de887d0ccd361008ef2b24cbbeae7e0eca9ff491bba162fe2dc710be"
     },
     {
       "path": "program/programs/ratpool-escrow/src/events.rs",
-      "sha256": "9510e6af37d21c852d45edb57920201f4f55b83ea111304bfff76fe1b73e57af"
+      "sha256": "090074f1a3e53a32985883aab3f7811199ed97fb2879ead78c519a5f88796e94"
     },
     {
       "path": "program/programs/ratpool-escrow/src/instructions.rs",
@@ -157,7 +165,7 @@
     },
     {
       "path": "program/programs/ratpool-escrow/src/instructions/create_match.rs",
-      "sha256": "7c2931ba9386bd02a6f736ef11de7834a7b92b61eaaee407adce3d3aca89ad20"
+      "sha256": "78bba426371edcc026224e9118a98347a5fcbe7bc70ee76915b7b139a5629f46"
     },
     {
       "path": "program/programs/ratpool-escrow/src/instructions/evict.rs",
@@ -165,7 +173,7 @@
     },
     {
       "path": "program/programs/ratpool-escrow/src/instructions/initialize.rs",
-      "sha256": "f4af4c4a816528447933173916051de1836541dab9c117dd7b0493c73b338993"
+      "sha256": "4cac8d462882c5c8732f7611f671adc6dec7cb2c52253397df9cbd79900f0d86"
     },
     {
       "path": "program/programs/ratpool-escrow/src/instructions/join.rs",
@@ -181,27 +189,27 @@
     },
     {
       "path": "program/programs/ratpool-escrow/src/instructions/settle_signed.rs",
-      "sha256": "b2cb41168f187357711cc12257868e94331f129cbd5848ed2aae486c5420d2d2"
+      "sha256": "0243adf2f473b1c2cae80d3e76689aa21af2e076b6dc1b50af42afec96b54cb8"
     },
     {
       "path": "program/programs/ratpool-escrow/src/instructions/update_config.rs",
-      "sha256": "c9fd4ee3045ddefb0f6c267875f374e7272ec4b09efe39f5e67345c99c95fa66"
+      "sha256": "8b61a5253add9a48f6f1651771e5a5f1bc3fdf3e50598cbeaeee62a37a6f5b6c"
     },
     {
       "path": "program/programs/ratpool-escrow/src/lib.rs",
-      "sha256": "f783fc3b651345576dd21315cd326318d67a040699ae8280fb14298271ca02cf"
+      "sha256": "297b97b0ec92fb30dc60e267ce721c54a50b90664a1c5869d8775603477a57e4"
     },
     {
       "path": "program/programs/ratpool-escrow/src/state.rs",
-      "sha256": "26edb002555bf5517c3667f2735a236046535c40995cd97b230112b0e3d4d963"
+      "sha256": "a2880439ecb075ad8270ba02d843d94826571e589b58a0d534c662c9a73666bf"
     },
     {
       "path": "program/programs/ratpool-escrow/tests/escrow.rs",
-      "sha256": "1591f2c7a23c7bd8c0eabe71b9e8ab1176f9d90a950d5e66fa0b18ca9473a183"
+      "sha256": "39fc4ac7ca595e2ac886728d28f717e36b4794cd95dc6144d5b9bc592adf04ac"
     },
     {
       "path": "program/README.md",
-      "sha256": "c5940b6123b4d883fe0d93464a3adbf45fa8f263d9955fd784b7003b298f3379"
+      "sha256": "dcd6b13f4a5799a1f05d031218560fa8bf6f554ccfaaf207384eb4354a84e3cf"
     },
     {
       "path": "program/rust-toolchain.toml",
@@ -216,12 +224,24 @@
       "sha256": "42bb086a8a2ffa19c340f39fcd9247f8b9f876aa344f4da264824f741afdb1b9"
     },
     {
+      "path": "program/UPGRADE-v6.md",
+      "sha256": "e101fafeaa4e1f36f8e2ab5e307a282f7b2c91f87d476d6131447e11a16b5832"
+    },
+    {
       "path": "README.md",
-      "sha256": "73d1e23f1f996f7ac3f92f53ca5184defefecbfa30c0fc8341020355d701f73a"
+      "sha256": "11d370c56e91a46f246203417d3d83e1a374a9ea7ce6336a0e47f75952f611d4"
     },
     {
       "path": "scripts/refund-expired.mjs",
-      "sha256": "3ebe39e528bf6921534bcab99e8a5a37cb3cc766bdf2d2ebec5ddd37833ebfc0"
+      "sha256": "2a1023d1c84c18e35310d2beaeb963bd2055f9e9795ca532ddec822805a92f93"
+    },
+    {
+      "path": "scripts/test-economy-v6-sql.mjs",
+      "sha256": "3aff85b2de3dc495f4330b94d061ddac0dfc0876513800c9b5e078a8e78d75a6"
+    },
+    {
+      "path": "scripts/test-refund-layout.mjs",
+      "sha256": "41cbc38f8057fb6e496cd837ef5cc284e034cfe51be28bcfd011b1f4875f1c24"
     },
     {
       "path": "SECURITY.md",
@@ -229,7 +249,7 @@
     },
     {
       "path": "server/src/api.ts",
-      "sha256": "28fa944657214eff319dac70b7232f8f6097f3deba3f49755d4774454e5517ca"
+      "sha256": "89b2ca2e3455cf5433280a574f405f8965e574b470a15a47f2f6f396d50645b1"
     },
     {
       "path": "src/chain/config.ts",
@@ -237,11 +257,11 @@
     },
     {
       "path": "src/chain/db.ts",
-      "sha256": "d9fd59b9c773ad35d0afd868c386f9eaf5557a6897bd0c59155ab683f4c0be50"
+      "sha256": "af3c66751df3348dd33deb437db7e8976ae7a0d153c1471a0dfc681af2758676"
     },
     {
       "path": "src/chain/escrow.ts",
-      "sha256": "f604e6f6e5088dff19100f43a559638bb54ffe342239ff20dc96adc3fc32066c"
+      "sha256": "20df36cb95d5f1076129dfea0d744bda818ee842388d8ed676b3e6688eadd4a9"
     },
     {
       "path": "src/chain/faucet.ts",
@@ -249,23 +269,27 @@
     },
     {
       "path": "src/chain/idl/ratpool_escrow.idl.ts",
-      "sha256": "111f97c3fef60578dab46a21f9543079bc36742f7b70117c563bb16d91568ca3"
+      "sha256": "4b8f0d0e3965867d70110d4fe13ae0aa7d8a4a8b7d294c8339f0600794833867"
     },
     {
       "path": "src/chain/idl/ratpool_escrow.json",
-      "sha256": "21b844f297199174fe27cd609f86dfd6e0ed1bfe0e56c18616816c866a61aa90"
+      "sha256": "8dae857b84514db5ef51d04e2de00a0489222771a001a2a0079fdcb473e28baf"
     },
     {
       "path": "src/chain/idl/ratpool_escrow.ts",
-      "sha256": "1de0efac37a0ed0a9bd98dbebf9547a00045c90438fc07a08ff3f0e16d7e5fdf"
+      "sha256": "4a5b0b7c900a3c02402808a4d7d90cbf61b02d7081f5aeb969377727ec5272b4"
     },
     {
       "path": "src/chain/idl/ratpool_escrow.v3.idl.ts",
       "sha256": "3d7952845ee7fd366e7d04cf37677ea29085dbfebb4adac7e543c0e350360a47"
     },
     {
+      "path": "src/chain/idl/ratpool_escrow.v5.idl.ts",
+      "sha256": "111f97c3fef60578dab46a21f9543079bc36742f7b70117c563bb16d91568ca3"
+    },
+    {
       "path": "src/chain/walletRequest.ts",
-      "sha256": "e8f5071d78f68a72d875d3fe59acfa1ce87a9d55108ac939edf6bbf379ab521a"
+      "sha256": "cca625bd3bc0127cc3f24da59683c0b7a1a8c736a454d2d47b69f0c42dd79d4f"
     },
     {
       "path": "src/economy/ChainEconomy.ts",
@@ -284,6 +308,14 @@
       "sha256": "b2a66d15ca6a008caa3aa771ba37e84f09e5e887db986712641d39c97f6bfe0c"
     },
     {
+      "path": "src/state/payout.ts",
+      "sha256": "d931de9fe49ffad3f77174d4e90ca2c2a08d65629552fb22a2a0b042133df1a2"
+    },
+    {
+      "path": "src/state/skulls.ts",
+      "sha256": "880b1a7ec0b14c3bb081e3d02d7be95ef3b13cb7cae87f12e1a2cb1d3336fa2b"
+    },
+    {
       "path": "supabase/2026-09-29-limits-and-referrals.sql",
       "sha256": "014a5a8d4ef547772e3ae72b54a79d4331a0148db25d618e624ef8c0cac8bfea"
     },
@@ -292,12 +324,20 @@
       "sha256": "ac73bdb5f7e88d565bfcca1c925f23e7b240f40916389541820459532e4a1409"
     },
     {
+      "path": "supabase/2026-11-25-free-play-leaderboard.sql",
+      "sha256": "ef32c30508b13bb97d2091f77e4118508257dc1790d0af198d44aa35690d2ffd"
+    },
+    {
+      "path": "supabase/migrations/20261126201639_economy_v6_points.sql",
+      "sha256": "52ad5bb13469bf07ee3db6ee6eefdb3c9f99cce4e93f46f14e10ab6dba91d617"
+    },
+    {
       "path": "supabase/schema.sql",
       "sha256": "a5dd4994d80b84fa8c8c5ce403016714065068997350c2999d3acfa65a7594fb"
     },
     {
       "path": "vercel.json",
-      "sha256": "75bf78c6e725f267f558b6dc9d74ba79b6d854865d446f7d1ed151b5ae865f1f"
+      "sha256": "ed5bc4a2379a637e647c7123304628a6a1a5200faf6fce9e0fb0339c21627a2b"
     }
   ]
 }

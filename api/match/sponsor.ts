@@ -1,3 +1,4 @@
+import { requirePaidPoolsOpen } from "../_maintenance.js";
 import { Transaction } from "@solana/web3.js";
 import { getAccount } from "@solana/spl-token";
 import { withinLimit } from "../_db.js";
@@ -31,6 +32,7 @@ export const POST = endpoint(async (body, req) => {
   requireOutsideWallet(player);
   const action = body.action;
   if (action !== "join" && action !== "leave") throw new HttpError(400, "action must be join or leave");
+  if (action === "join") requirePaidPoolsOpen();
   let expectedEntry = 0n;
   if (action === "join") {
     if (body.entry === undefined) throw new HttpError(426, "Update RatPool to approve the pool entry.");

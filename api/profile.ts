@@ -2,6 +2,7 @@ import { preflight, endpoint, checkSignedFor, HttpError, ipKey, parsePubkey, sig
 import { DB_ENABLED, dbInsertNew, dbPatchCount, dbSelect, withinLimit } from "./_db.js";
 import { readAccountState, saveAccountState } from "./_account.js";
 import { isReferralMessage, referralMessage, verifyReferral } from "./_referral.js";
+import { freePlayMessage } from "./_freeplay.js";
 
 /**
  * POST /api/profile  { message, signature }  →  { ok }
@@ -33,6 +34,7 @@ const PROFILE_MAX = 2048;
 
 export const POST = endpoint(async (body, req) => {
   if (!DB_ENABLED) throw new HttpError(503, "no database configured");
+  if (body.freePlay === "start" || body.freePlay === "finish") return freePlayMessage(body, req!);
   const message = body.message;
   const signature = body.signature;
   if (typeof message !== "string" || typeof signature !== "string") {
@@ -120,3 +122,8 @@ export const POST = endpoint(async (body, req) => {
 
 /** The Android app asks before it posts; see preflight in _lib. */
 export const OPTIONS = preflight;
+
+/** Public cutover status; no account information or secret configuration. */
+export const GET = async () => Response.json({ paidPoolsPaused: process.env.PAID_POOLS_PAUSED === "1", economyVersion: 6 }, {
+  headers: { "cache-control": "no-store", "access-control-allow-origin": "*" },
+});

@@ -311,12 +311,30 @@ impl World {
         );
         let a = self.authority.insecure_clone();
         self.send(ix, &[&a])?;
+        assert_eq!(self.get_config().winner_count, 7);
+        assert_eq!(self.get_config().winner_weights[..7], PODIUM_SHARES);
         let logs = self.last_logs.clone();
         let admin = self.admin.insecure_clone();
         let room = self.room.pubkey();
         self.set_room_key_as(room, &admin)?;
+        // Existing adversarial cases also exercise a configured three-place
+        // policy. Dedicated v6 cases below use the new default seven-place
+        // policy with 25/40/50 real token-account participants in LiteSVM.
+        self.set_policy(&[50, 30, 20])?;
         self.last_logs = logs;
         Ok(())
+    }
+
+    fn set_policy(&mut self, weights: &[u16]) -> Result<(), String> {
+        let admin = self.admin.insecure_clone();
+        let ix = self.ix(
+            ratpool_escrow::instruction::UpdatePayoutPolicy { weights: weights.to_vec() }.data(),
+            ratpool_escrow::accounts::UpdateConfig {
+                config: self.config, admin: admin.pubkey(), program: self.program_id,
+                program_data: self.program_data(),
+            }.to_account_metas(None),
+        );
+        self.send(ix, &[&admin])
     }
 
     fn set_room_key_as(&mut self, room_key: Pubkey, signer: &Keypair) -> Result<(), String> {
@@ -421,9 +439,8 @@ impl World {
     /// in podium order; each winner's invite record address follows (from
     /// the owner of its account); `refs` are the referrers' token accounts,
     /// for the records that exist, in podium order.
-    fn settle_signed_ix(&self, id: u64, signer: &Pubkey, fee_ata: &Pubkey, pay: &[Pubkey], refs: &[Pubkey]) -> Instruction {
-        let slots: Vec<Pubkey> = pay.iter().map(|a| self.referral_pda(&self.token_owner(a))).collect();
-        self.settle_signed_ix_with(id, signer, fee_ata, pay, &slots, refs)
+    fn settle_signed_ix(&self, id: u64, signer: &Pubkey, fee_ata: &Pubkey, pay: &[Pubkey], _refs: &[Pubkey]) -> Instruction {
+        self.settle_signed_ix_with(id, signer, fee_ata, pay, &[], &[])
     }
 
     /// As settle_signed_ix, with the invite record addresses given outright.
@@ -1120,14 +1137,14 @@ fn six_player_settlement(referrer_count: usize, duplicate: bool, entry: u64) {
         assert_eq!(w.balance(&atas[0]), 4_000_000 + 2_850_000);
         assert_eq!(w.balance(&atas[1]), 4_000_000 + 1_710_000);
         assert_eq!(w.balance(&atas[2]), 4_000_000 + 1_140_000);
-        assert_eq!(w.balance(&fee_ata), if refs.is_empty() { 300_000 } else { 240_000 });
-        assert_eq!(w.balance(&a1), match referrer_count { 0 => 0, 1 => 60_000, _ if duplicate => 60_000, _ => 30_000 });
-        assert_eq!(w.balance(&a2), if referrer_count == 2 && !duplicate { 30_000 } else { 0 });
+        assert_eq!(w.balance(&fee_ata), 300_000);
+        assert_eq!(w.balance(&a1), 0);
+        assert_eq!(w.balance(&a2), 0);
     } else {
         // 6 * 1,000,017 = 6,000,102: fee 300,005, referral total 60,001.
-        assert_eq!(w.balance(&a1), 30_000);
-        assert_eq!(w.balance(&a2), 30_000);
-        assert_eq!(w.balance(&fee_ata), 240_005);
+        assert_eq!(w.balance(&a1), 0);
+        assert_eq!(w.balance(&a2), 0);
+        assert_eq!(w.balance(&fee_ata), 300_005);
         // net 5,700,097: 30% floors to 1,710,029, 20% to 1,140,019, first takes the rest.
         assert_eq!(w.balance(&atas[0]), 5 * USDC - entry + 2_850_049);
         assert_eq!(w.balance(&atas[1]), 5 * USDC - entry + 1_710_029);
@@ -1144,16 +1161,16 @@ fn six_player_settlement(referrer_count: usize, duplicate: bool, entry: u64) {
 fn six_stakers_no_referrers() { six_player_settlement(0, false, USDC); }
 
 #[test]
-fn one_referrer_receives_one_percent() { six_player_settlement(1, false, USDC); }
+fn one_referrer_receives_no_cash() { six_player_settlement(1, false, USDC); }
 
 #[test]
-fn two_referrers_share_one_percent() { six_player_settlement(2, false, USDC); }
+fn two_referrers_receive_no_cash() { six_player_settlement(2, false, USDC); }
 
 #[test]
-fn referral_rounding_stays_with_platform() { six_player_settlement(2, false, USDC + 17); }
+fn full_fee_and_rounding_stay_with_platform() { six_player_settlement(2, false, USDC + 17); }
 
 #[test]
-fn duplicate_referrers_receive_both_shares() { six_player_settlement(2, true, USDC); }
+fn duplicate_referrers_cannot_change_payouts() { six_player_settlement(2, true, USDC); }
 
 #[test]
 fn fewer_than_required_winners_are_refused() {
@@ -1193,7 +1210,7 @@ fn open_match_fee_is_pinned() {
 }
 
 #[test]
-fn ten_percent_match_settles_with_an_invite_reward() {
+fn ten_percent_match_keeps_the_full_fee_with_invites() {
     // The deployed setting from 8 October 2026: the platform's 10%, out of
     // which the invite reward (1% of the pool) is paid; the podium shares 90%.
     let mut w = World::new();
@@ -1215,8 +1232,8 @@ fn ten_percent_match_settles_with_an_invite_reward() {
     assert_eq!(w.balance(&atas[0]), 4_000_000 + 2_700_000);
     assert_eq!(w.balance(&atas[1]), 4_000_000 + 1_620_000);
     assert_eq!(w.balance(&atas[2]), 4_000_000 + 1_080_000);
-    assert_eq!(w.balance(&a1), 60_000);
-    assert_eq!(w.balance(&fee_ata), 540_000);
+    assert_eq!(w.balance(&a1), 0);
+    assert_eq!(w.balance(&fee_ata), 600_000);
     assert_eq!(w.balance(&w.vault_pda(25)), 0);
 }
 
@@ -1332,53 +1349,31 @@ fn initialize_requires_upgrade_authority() {
 }
 
 #[test]
-fn referral_shares_never_exceed_the_fee() {
-    let mut w = World::new();
-    w.initialize(1).unwrap();
-    w.update_config(Some(50), None).unwrap();
-    w.create_match(27, USDC).unwrap();
-    let players = w.room(27, 1);
-    w.collect(27, &[players[0].1]).unwrap();
-    w.start(27).unwrap();
-    let podium = [(players[0].0.pubkey(), players[0].1)];
-    let (r, ata) = w.player(0);
-    w.set_referrer(&players[0].0, r.pubkey()).unwrap();
-    let a = w.authority.insecure_clone();
-    let fee = w.fee_ata;
-    expect_err(w.settle_with_referrers_as(27, &a, &fee, &podium, &[ata; 2]), "BadReferral");
+fn referral_accounts_cannot_extract_any_part_of_the_fee() {
+    let mut w = World::new(); w.initialize(1).unwrap();
+    let players = started(&mut w, 27, 1);
+    let (r, r_ata) = w.player(0); w.set_referrer(&players[0].0, r.pubkey()).unwrap();
+    let a = w.authority.insecure_clone(); let fee = w.fee_ata;
+    let ranking = [players[0].0.pubkey()]; let pay = [players[0].1];
+    let msg = w.settle_message(27, &ranking); let room = w.room.insecure_clone();
+    let ix = w.settle_signed_ix_with(27, &a.pubkey(), &fee, &pay, &[], &[r_ata]);
+    expect_err(w.send_all(&[ed25519_ix(&room, &msg), ix], &[&a]), "BadPodium");
     assert_eq!(w.balance(&w.vault_pda(27)), USDC);
-    // A 0.5% fee, under the 1% share: the referrer gets the whole fee and no
-    // more; the winner's 99.5% is untouched.
-    w.settle_with_referrers_as(27, &a, &fee, &podium, &[ata]).unwrap();
-    assert_eq!(w.balance(&ata), 5_000);
-    assert_eq!(w.balance(&fee), 0);
-    assert_eq!(w.balance(&players[0].1), 5 * USDC - USDC + 995_000);
+    w.settle(27, &[(ranking[0], pay[0])]).unwrap();
+    assert_eq!(w.balance(&r_ata), 0); assert_eq!(w.balance(&fee), 50_000);
 }
 
 #[test]
-fn referral_destinations_must_match_owner_and_mint() {
-    let mut w = World::new();
-    w.initialize(1).unwrap();
-    w.create_match(28, USDC).unwrap();
-    let players = w.room(28, 1);
-    w.collect(28, &[players[0].1]).unwrap();
-    w.start(28).unwrap();
-    let podium = [(players[0].0.pubkey(), players[0].1)];
-    let (r, ata) = w.player(0);
-    w.set_referrer(&players[0].0, r.pubkey()).unwrap();
-    let a = w.authority.insecure_clone();
-    let fee = w.fee_ata;
-    // Paid only to the recorded referrer's usual account.
-    expect_err(w.settle_with_referrers_as(28, &a, &fee, &podium,
-        &[players[0].1]), "NotUsualAccount");
-    let mut acc = w.svm.get_account(&ata).unwrap();
+fn a_broken_referrer_token_account_cannot_block_the_winners() {
+    let mut w = World::new(); w.initialize(1).unwrap();
+    let players = started(&mut w, 28, 1);
+    let (r, r_ata) = w.player(0); w.set_referrer(&players[0].0, r.pubkey()).unwrap();
+    let mut acc = w.svm.get_account(&r_ata).unwrap();
     acc.data[..32].copy_from_slice(Pubkey::new_unique().as_ref());
-    w.svm.set_account(ata, acc).unwrap();
-    expect_err(w.settle_with_referrers_as(28, &a, &fee, &podium,
-        &[ata]), "WrongMint");
-    assert_eq!(w.balance(&fee), 0);
-    assert_eq!(w.balance(&w.vault_pda(28)), USDC);
-    assert_eq!(w.get_match(28).unwrap().state, MatchState::Collected);
+    w.svm.set_account(r_ata, acc).unwrap();
+    w.settle(28, &[(players[0].0.pubkey(), players[0].1)]).unwrap();
+    assert_eq!(w.balance(&r_ata), 0); assert_eq!(w.balance(&w.fee_ata), 50_000);
+    assert_eq!(w.balance(&w.vault_pda(28)), 0);
 }
 
 #[test]
@@ -1531,7 +1526,7 @@ fn close_uses_the_match_fee_wallet_after_config_changes() {
 }
 
 #[test]
-fn non_staker_referrals_remain_bounded_by_the_fee() {
+fn non_staker_referrals_receive_no_cash() {
     let mut w = World::new();
     w.initialize(3).unwrap();
     w.create_match(37, ENTRY).unwrap();
@@ -1545,7 +1540,7 @@ fn non_staker_referrals_remain_bounded_by_the_fee() {
     let a = w.authority.insecure_clone();
     let fee = w.fee_ata;
     w.settle_with_referrers_as(37, &a, &fee, &podium, &[outsider_ata]).unwrap();
-    assert_eq!(w.balance(&outsider_ata), 3 * ENTRY / 100);
+    assert_eq!(w.balance(&outsider_ata), 0);
     assert_eq!(w.balance(&fee) + w.balance(&outsider_ata), 3 * ENTRY / 20);
     let payouts: u64 = atas.iter().map(|ata| w.balance(ata) - (5 * USDC - ENTRY)).sum();
     assert_eq!(payouts, 3 * ENTRY * 95 / 100);
@@ -2059,10 +2054,10 @@ fn leave_needs_only_the_player_and_the_recorded_source() {
 }
 
 #[test]
-fn v2_seeds_isolate_legacy_config_and_match_accounts() {
+fn v6_seeds_isolate_legacy_config_and_match_accounts() {
     let mut w = World::new();
-    assert_eq!(CONFIG_SEED, b"config_v2");
-    assert_eq!(MATCH_SEED, b"match_v2");
+    assert_eq!(CONFIG_SEED, b"config_v6");
+    assert_eq!(MATCH_SEED, b"match_v6");
     let legacy_config = Pubkey::find_program_address(&[b"config"], &w.program_id).0;
     let legacy_match = Pubkey::find_program_address(&[b"match".as_ref(), &61u64.to_le_bytes()], &w.program_id).0;
     assert_ne!(w.config, legacy_config);
@@ -2213,17 +2208,15 @@ fn a_ranking_with_too_few_stakers_is_refused_not_topped_up() {
 }
 
 #[test]
-fn a_ranking_holds_one_to_six_distinct_wallets() {
-    let mut w = World::new();
-    w.initialize(1).unwrap();
-    let players = started(&mut w, 75, 8);
-    let a = w.authority.insecure_clone();
-    let fee = w.fee_ata;
+fn a_ranking_holds_one_to_twelve_distinct_wallets() {
+    let mut w = World::new(); w.initialize(1).unwrap();
+    let players = started(&mut w, 75, 13);
+    let a = w.authority.insecure_clone(); let fee = w.fee_ata;
     let pay: Vec<Pubkey> = players[..3].iter().map(|(_, a)| *a).collect();
     expect_err(w.settle_signed_as(75, &a, &fee, &[], &pay, &[]), "BadRanking");
-    let seven: Vec<Pubkey> = players[..7].iter().map(|(k, _)| k.pubkey()).collect();
-    expect_err(w.settle_signed_as(75, &a, &fee, &seven, &pay, &[]), "BadRanking");
-    w.settle_signed_as(75, &a, &fee, &seven[..6], &pay, &[]).unwrap();
+    let ranking: Vec<Pubkey> = players.iter().map(|(k, _)| k.pubkey()).collect();
+    expect_err(w.settle_signed_as(75, &a, &fee, &ranking, &pay, &[]), "BadRanking");
+    w.settle_signed_as(75, &a, &fee, &ranking[..12], &pay, &[]).unwrap();
 }
 
 #[test]
@@ -2245,7 +2238,7 @@ fn a_winner_is_paid_only_into_their_usual_account() {
     let winner = players[0].0.pubkey();
     let msg = w.settle_message(73, &[winner]);
     let room = w.room.insecure_clone();
-    let ix = w.settle_signed_ix_with(73, &a.pubkey(), &fee, &[usual], &[w.referral_pda(&winner)], &[]);
+    let ix = w.settle_signed_ix_with(73, &a.pubkey(), &fee, &[usual], &[], &[]);
     w.send_all(&[ed25519_ix(&room, &msg), ix], &[&a]).unwrap();
     assert_eq!(w.balance(&usual), before + 950_000);
     assert_eq!(w.balance(&spare), 0);
@@ -2342,7 +2335,7 @@ fn a_last_batch_short_of_the_minimum_moves_nothing() {
 }
 
 #[test]
-fn the_receipt_names_each_referrers_winner() {
+fn the_v6_receipt_has_no_cash_referrals() {
     let mut w = World::new();
     w.initialize(1).unwrap();
     let players = started(&mut w, 93, 6);
@@ -2358,17 +2351,19 @@ fn the_receipt_names_each_referrers_winner() {
     let net = pool - fee_total;
     let second = net * 30 / 100;
     let third = net * 20 / 100;
-    let referral = pool / 100;
     w.expect_event(ratpool_escrow::events::MatchSettled {
         id: 93,
         pool,
         fee: fee_total,
         winners: ranking.clone(),
         amounts: vec![net - second - third, second, third],
-        referrers: vec![r.pubkey()],
-        referral_amounts: vec![referral],
-        platform_fee: fee_total - referral,
-        referred: vec![players[1].0.pubkey()],
+        referrers: vec![],
+        referral_amounts: vec![],
+        platform_fee: fee_total,
+        referred: vec![],
+        economy_version: ECONOMY_VERSION,
+        winner_weights: vec![50, 30, 20],
+        collected_at: w.get_match(93).unwrap().collected_at,
     });
 }
 
@@ -2422,42 +2417,34 @@ fn referrals_are_the_winners_own_records() {
     };
     // A record of someone off the podium in a winner's place.
     let (s0, s1, s2, s3) = (rec(&w, 0), rec(&w, 1), rec(&w, 2), rec(&w, 3));
-    expect_err(with_slots(&mut w, &[s3, s1, s2], &[r3_ata, r1_ata]), "BadReferral");
+    expect_err(with_slots(&mut w, &[s3, s1, s2], &[r3_ata, r1_ata]), "BadPodium");
     // The same record twice.
-    expect_err(with_slots(&mut w, &[s0, s0, s2], &[r0_ata, r0_ata]), "BadReferral");
+    expect_err(with_slots(&mut w, &[s0, s0, s2], &[r0_ata, r0_ata]), "BadPodium");
     // Not a record at all.
     let config = w.config;
-    expect_err(with_slots(&mut w, &[config, s1, s2], &[r1_ata]), "BadReferral");
+    expect_err(with_slots(&mut w, &[config, s1, s2], &[r1_ata]), "BadPodium");
     // A record left out, to shift the shares: every one must be paid.
-    expect_err(with_slots(&mut w, &[s0, s1, s2], &[r0_ata]), "BadReferral");
+    expect_err(with_slots(&mut w, &[s0, s1, s2], &[r0_ata]), "BadPodium");
     // A winner's record paid to somebody else.
-    expect_err(with_slots(&mut w, &[s0, s1, s2], &[r3_ata, r1_ata]), "NotUsualAccount");
+    expect_err(with_slots(&mut w, &[s0, s1, s2], &[r3_ata, r1_ata]), "BadPodium");
     assert_eq!(w.balance(&w.vault_pda(76)), 6 * USDC);
 
     // Both records: 1% of 6 USDC split between them, out of the 5%.
-    with_slots(&mut w, &[s0, s1, s2], &[r0_ata, r1_ata]).unwrap();
-    assert_eq!(w.balance(&r0_ata), 30_000);
-    assert_eq!(w.balance(&r1_ata), 30_000);
+    with_slots(&mut w, &[], &[]).unwrap();
+    assert_eq!(w.balance(&r0_ata), 0);
+    assert_eq!(w.balance(&r1_ata), 0);
     assert_eq!(w.balance(&r3_ata), 0);
-    assert_eq!(w.balance(&fee), 240_000);
+    assert_eq!(w.balance(&fee), 300_000);
 }
 
 #[test]
-fn one_invited_winner_earns_their_referrer_the_whole_one_percent() {
-    let mut w = World::new();
-    w.initialize(1).unwrap();
+fn an_invited_winner_does_not_trigger_a_cash_payment() {
+    let mut w = World::new(); w.initialize(1).unwrap();
     let players = started(&mut w, 77, 6);
-    let (r0, r0_ata) = w.player(0);
-    w.set_referrer(&players[0].0, r0.pubkey()).unwrap();
-    let podium: Vec<_> = players[..3].iter().map(|(k, a)| (k.pubkey(), *a)).collect();
-    // The record cannot be skipped.
-    expect_err(w.settle(77, &podium), "BadReferral");
-    let a = w.authority.insecure_clone();
-    let fee = w.fee_ata;
-    w.settle_with_referrers_as(77, &a, &fee, &podium, &[r0_ata]).unwrap();
-    assert_eq!(w.balance(&r0_ata), 60_000);
-    assert_eq!(w.balance(&fee), 240_000);
-    // The podium's 95% is untouched either way.
+    let (r, r_ata) = w.player(0); w.set_referrer(&players[0].0, r.pubkey()).unwrap();
+    let podium: Vec<_> = players[..3].iter().map(|(k,a)| (k.pubkey(),*a)).collect();
+    w.settle(77, &podium).unwrap();
+    assert_eq!(w.balance(&r_ata), 0); assert_eq!(w.balance(&w.fee_ata), 300_000);
     assert_eq!(w.balance(&players[0].1), 4 * USDC + 2_850_000);
 }
 
@@ -2535,30 +2522,26 @@ fn config_changes_need_the_upgrade_authority_not_the_payout_key() {
 }
 
 #[test]
-fn the_largest_payout_fits_one_transaction() {
-    let mut w = World::new();
-    w.initialize(1).unwrap();
-    let players = started(&mut w, 80, 6);
-    let mut refs = Vec::new();
-    for (kp, _) in players[..3].iter() {
-        let (r, r_ata) = w.player(0);
-        w.set_referrer(kp, r.pubkey()).unwrap();
-        refs.push(r_ata);
-    }
-    let ranking: Vec<Pubkey> = players.iter().map(|(k, _)| k.pubkey()).collect();
-    let pay: Vec<Pubkey> = players[..3].iter().map(|(_, a)| *a).collect();
-    let a = w.authority.insecure_clone();
-    let room = w.room.insecure_clone();
-    let fee = w.fee_ata;
+fn the_seven_winner_payout_fits_one_transaction() {
+    let mut w = World::new(); w.initialize(25).unwrap();
+    w.set_policy(&PODIUM_SHARES).unwrap(); w.update_config(Some(1_000), None).unwrap();
+    w.create_match(80, USDC).unwrap(); let players = w.room(80, 40);
+    let atas: Vec<_> = players.iter().map(|(_,a)| *a).collect();
+    for batch in atas.chunks(8) { w.collect(80, batch).unwrap(); }
+    w.start(80).unwrap(); w.advance_clock(1);
+    let ranking: Vec<Pubkey> = players[..7].iter().map(|(k,_)| k.pubkey()).collect();
+    let a = w.authority.insecure_clone(); let room = w.room.insecure_clone();
     let msg = w.settle_message(80, &ranking);
-    let ixs = [compute_limit(), ed25519_ix(&room, &msg), w.settle_signed_ix(80, &a.pubkey(), &fee, &pay, &refs)];
+    let ixs = [compute_limit(), ed25519_ix(&room, &msg), w.settle_signed_ix(80, &a.pubkey(), &w.fee_ata, &atas[..7], &[])];
     let blockhash = w.svm.latest_blockhash();
     let size = 1 + 64 + Message::new_with_blockhash(&ixs, Some(&a.pubkey()), &blockhash).serialize().len();
-    assert!(size <= 1232, "a full payout is {size} bytes; a transaction holds 1232");
+    assert!(size <= 1232, "seven-winner payout is {size} bytes; maximum 1232");
     w.send_all(&ixs, &[&a]).unwrap();
-    for r_ata in refs.iter() {
-        assert_eq!(w.balance(r_ata), 20_000);
+    for (i, amount) in [8_000_000,7_200_000,6_400_000,4_800_000,4_000_000,3_200_000,2_400_000].iter().enumerate() {
+      assert_eq!(w.balance(&atas[i]), 4 * USDC + amount);
     }
+    assert_eq!(w.balance(&w.fee_ata), 4 * USDC);
+    assert_eq!(w.balance(&w.vault_pda(80)), 0);
 }
 
 fn unhex(s: &str) -> Vec<u8> {
@@ -2572,8 +2555,8 @@ fn unhex(s: &str) -> Vec<u8> {
 /// fails before any payout does.
 #[test]
 fn the_room_servers_own_bytes_are_accepted() {
-    const MSG: &str = "726174706f6f6c2d736574746c652d7631b0bc0a517d71414f686b8686dc70caae41dc190bdd46ba069467675148e3a31a5a000000000000004098c66a00000000038139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d18a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c";
-    const SIG: &str = "536e2d1a16dfd1ec0719f093fa0b29c37e6ba3cb7985226f94a259afc9c5862f8553d841f05218c57706e9c21619ff48c73d36c7a8b42591cec760f52af6f50d";
+    const MSG: &str = "726174706f6f6c2d736574746c652d7636b0bc0a517d71414f686b8686dc70caae41dc190bdd46ba069467675148e3a31a5a000000000000004098c66a00000000038139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d18a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c";
+    const SIG: &str = "7de352874f041a29eaf038906ee0d5dd84760b16ba46cad2b018fd952af0d867d86476cd065ccffc1a5d5486f4af9b5da13ec6fb869bf7a85ca01fa4aef6c506";
     let mut w = World::new();
     w.room = Keypair::new_from_array([9u8; 32]);
     // The start time the room signed: the clock is there before the match opens.
@@ -2714,4 +2697,37 @@ fn a_payout_waits_for_the_second_after_the_start() {
     w.advance_clock(1);
     let settle = w.settle_signed_ix(93, &a.pubkey(), &fee, &pay, &[]);
     expect_err(w.send_all(&[first, settle], &[&a]), "BadRoomSignature");
+}
+
+#[test]
+fn payout_policy_is_bounded_admin_only_and_pinned_per_match() {
+    let mut w = World::new(); w.initialize(25).unwrap();
+    w.set_policy(&PODIUM_SHARES).unwrap(); w.create_match(501, USDC).unwrap();
+    for weights in [vec![], vec![0], vec![1,2], vec![1;13]] {
+      expect_err(w.set_policy(&weights), "BadPayoutPolicy");
+    }
+    let admin = w.admin.insecure_clone(); let (stranger,_) = w.player(0); w.admin = stranger;
+    expect_err(w.set_policy(&[1]), "NotUpgradeAuthority"); w.admin = admin;
+    w.set_policy(&[12,11,10,9,8,7,6,5,4,3,2,1]).unwrap(); w.create_match(502, USDC).unwrap();
+    assert_eq!(w.get_match(501).unwrap().winner_count, 7);
+    assert_eq!(w.get_match(501).unwrap().winner_weights[..7], PODIUM_SHARES);
+    assert_eq!(w.get_match(502).unwrap().winner_count, 12);
+    assert_eq!(MAX_PLAYERS, 50);
+}
+
+#[test]
+fn twenty_five_players_pay_exactly_seven_and_conserve_every_unit() {
+    for count in [25,50] {
+      let mut w = World::new(); w.initialize(25).unwrap(); w.set_policy(&PODIUM_SHARES).unwrap();
+      w.update_config(Some(1_000), None).unwrap(); w.create_match(503, USDC).unwrap();
+      let players = w.room(503, count); let atas: Vec<_> = players.iter().map(|(_,a)| *a).collect();
+      for batch in atas.chunks(8) { w.collect(503,batch).unwrap(); } w.start(503).unwrap();
+      let podium: Vec<_> = players[..7].iter().map(|(k,a)| (k.pubkey(),*a)).collect();
+      w.settle(503,&podium).unwrap(); let pool = count as u64 * USDC;
+      let gross = [20,18,16,12,10,8,6];
+      for i in 0..7 { assert_eq!(w.balance(&atas[i]), 4 * USDC + pool * gross[i] / 100); }
+      for ata in &atas[7..] { assert_eq!(w.balance(ata), 4 * USDC); }
+      assert_eq!(w.balance(&w.fee_ata), pool / 10); assert_eq!(w.balance(&w.vault_pda(503)), 0);
+      assert_eq!(w.get_match(503).unwrap().players.iter().filter(|p| p.status == PlayerStatus::Paid).count(),7);
+    }
 }

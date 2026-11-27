@@ -7,10 +7,12 @@ the game client, its art and the match logic of the game server are not
 included. Reviewers who need them can ask for private access.
 
 RatPool is a 2D multiplayer arena shooter. Players stake test USDC into a
-pool, fight in a timed match, and the top three are paid by an escrow
-program on Solana: 50/30/20 of what is left after the fee (10% in the
-deployed configuration; fewer than three stakers share the same total). It
-runs on devnet.
+pool, fight in a timed match, and the top seven are paid by a Solana escrow.
+At the configured 10% fee their gross-pot shares are 20/18/16/12/10/8/6%.
+The entire commission goes to the platform. Direct referral rewards are
+leaderboard points (20 paid / 5 Free Play top-seven finishes), not cash.
+Current game rooms hold 25-40 paid players; the contract retains a 50-seat cap.
+It runs on devnet.
 
 Snapshot: see `EXPORT.txt` for the full source commit and date, and
 `EXPORT-MANIFEST.json` for each exported file's SHA-256. The private project is
@@ -18,12 +20,13 @@ the source of truth; this repository is its curated review copy, not a separate
 escrow implementation. Only committed source is exported, never local settings
 or unpublished branch changes.
 
-The current contract interface is devnet v5: `join(id, expected_entry)`.
-See `program/UPGRADE-v5.md` for the tested build hash and compatibility change.
-The v5 binary passed all 78 contract tests and was verified against the deployed
-devnet executable on 24 November 2026. This is test evidence, not independent
-auditor certification. Source in this extract may include historical migrations;
-their presence does not establish which migrations a hosted database has run.
+The v6 interface retains `join(id, expected_entry)` and uses new config/match
+seeds with a pinned winner count and weights. See `program/UPGRADE-v6.md`.
+The new binary passed 80 contract tests, including 25/40/50 stakers and a
+seven-winner settlement fitting 1,232 bytes. Deployment receipts must establish
+which binary is actually live. This is test evidence, not independent auditor
+certification. Historical migrations in this extract do not establish which
+migrations a hosted database has run.
 
 ## What is here
 
@@ -52,10 +55,10 @@ their presence does not establish which migrations a hosted database has run.
 4. **Settle.** After the match the game server signs the finishing order with
    its own Ed25519 key. The payout instruction (`settle_signed`) requires that
    signature, checked by the ed25519 precompile straight before it, over the
-   program id, the match id, the match's start time on chain and up to six
-   wallets. The program picks the top three stakers from it, pays them, pays
-   the inviters of invited winners from on-chain invite records, and sends
-   the rest of the fee to the destination pinned at creation.
+   v6 domain, program id, match id, on-chain start time and up to twelve
+   wallets (seven in the current service). The program chooses the pinned
+   number of stakers, pays their usual token accounts, and sends the full
+   commission to the destination pinned at creation. No referral cash moves.
 5. **Refund.** If a match is not settled within its refund delay of the first
    collection, settlement is refused and anyone can return every stake in
    full (`claim_refund`); the site sweeps for these every ten minutes.

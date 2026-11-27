@@ -44,6 +44,9 @@ pub struct CreateMatch<'info> {
 pub fn handle_create_match(ctx: Context<CreateMatch>, id: u64, entry: u64) -> Result<()> {
     require!(entry > 0, EscrowError::BadEntry);
     let m = &mut ctx.accounts.match_account;
+    m.economy_version = ECONOMY_VERSION;
+    m.winner_count = ctx.accounts.config.winner_count;
+    m.winner_weights = ctx.accounts.config.winner_weights;
     m.id = id;
     m.entry = entry;
     m.fee_bps = ctx.accounts.config.fee_bps;

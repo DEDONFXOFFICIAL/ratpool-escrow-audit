@@ -42,7 +42,7 @@ export type RatpoolEscrow = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -83,7 +83,7 @@ export type RatpoolEscrow = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -104,7 +104,7 @@ export type RatpoolEscrow = {
                   104,
                   95,
                   118,
-                  50
+                  54
                 ]
               },
               {
@@ -157,7 +157,7 @@ export type RatpoolEscrow = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -178,7 +178,7 @@ export type RatpoolEscrow = {
                   104,
                   95,
                   118,
-                  50
+                  54
                 ]
               },
               {
@@ -264,7 +264,7 @@ export type RatpoolEscrow = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -285,7 +285,7 @@ export type RatpoolEscrow = {
                   104,
                   95,
                   118,
-                  50
+                  54
                 ]
               },
               {
@@ -375,7 +375,7 @@ export type RatpoolEscrow = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -396,7 +396,7 @@ export type RatpoolEscrow = {
                   104,
                   95,
                   118,
-                  50
+                  54
                 ]
               },
               {
@@ -485,7 +485,7 @@ export type RatpoolEscrow = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -506,7 +506,7 @@ export type RatpoolEscrow = {
                   104,
                   95,
                   118,
-                  50
+                  54
                 ]
               },
               {
@@ -605,7 +605,7 @@ export type RatpoolEscrow = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -626,7 +626,7 @@ export type RatpoolEscrow = {
                   104,
                   95,
                   118,
-                  50
+                  54
                 ]
               },
               {
@@ -684,7 +684,7 @@ export type RatpoolEscrow = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -763,7 +763,7 @@ export type RatpoolEscrow = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -784,7 +784,7 @@ export type RatpoolEscrow = {
                   104,
                   95,
                   118,
-                  50
+                  54
                 ]
               },
               {
@@ -850,7 +850,7 @@ export type RatpoolEscrow = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -871,7 +871,7 @@ export type RatpoolEscrow = {
                   104,
                   95,
                   118,
-                  50
+                  54
                 ]
               },
               {
@@ -930,7 +930,7 @@ export type RatpoolEscrow = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -1091,7 +1091,7 @@ export type RatpoolEscrow = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -1196,7 +1196,7 @@ export type RatpoolEscrow = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -1234,7 +1234,7 @@ export type RatpoolEscrow = {
                   104,
                   95,
                   118,
-                  50
+                  54
                 ]
               },
               {
@@ -1334,7 +1334,7 @@ export type RatpoolEscrow = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -1355,7 +1355,7 @@ export type RatpoolEscrow = {
                   104,
                   95,
                   118,
-                  50
+                  54
                 ]
               },
               {
@@ -1409,7 +1409,7 @@ export type RatpoolEscrow = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -1456,6 +1456,62 @@ export type RatpoolEscrow = {
           "name": "admission",
           "type": {
             "option": "pubkey"
+          }
+        }
+      ]
+    },
+    {
+      "name": "updatePayoutPolicy",
+      "discriminator": [
+        103,
+        99,
+        212,
+        255,
+        252,
+        66,
+        39,
+        23
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103,
+                  95,
+                  118,
+                  54
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "program",
+          "address": "Ctu4Q9hJKUksKZ9mXrydtua2LcuvmM8Wt34Xc6VK1wmj"
+        },
+        {
+          "name": "programData"
+        }
+      ],
+      "args": [
+        {
+          "name": "weights",
+          "type": {
+            "vec": "u16"
           }
         }
       ]
@@ -1634,6 +1690,19 @@ export type RatpoolEscrow = {
       ]
     },
     {
+      "name": "payoutPolicyUpdated",
+      "discriminator": [
+        217,
+        238,
+        184,
+        155,
+        102,
+        198,
+        121,
+        197
+      ]
+    },
+    {
       "name": "playerEvicted",
       "discriminator": [
         55,
@@ -1789,7 +1858,7 @@ export type RatpoolEscrow = {
     {
       "code": 6012,
       "name": "badPodium",
-      "msg": "Podium must contain min(3, collected_count) distinct stakers with matching token accounts"
+      "msg": "Podium must contain min(pinned winner_count, collected_count) distinct stakers with matching token accounts"
     },
     {
       "code": 6013,
@@ -1879,7 +1948,7 @@ export type RatpoolEscrow = {
     {
       "code": 6030,
       "name": "badRanking",
-      "msg": "The ranking must hold one to six distinct wallets"
+      "msg": "The ranking must hold one to twelve distinct wallets"
     },
     {
       "code": 6031,
@@ -1900,6 +1969,11 @@ export type RatpoolEscrow = {
       "code": 6034,
       "name": "entryChanged",
       "msg": "The pool entry changed; approve the displayed amount again"
+    },
+    {
+      "code": 6035,
+      "name": "badPayoutPolicy",
+      "msg": "Invalid payout policy"
     }
   ],
   "types": [
@@ -1940,6 +2014,19 @@ export type RatpoolEscrow = {
       "type": {
         "kind": "struct",
         "fields": [
+          {
+            "name": "winnerCount",
+            "type": "u8"
+          },
+          {
+            "name": "winnerWeights",
+            "type": {
+              "array": [
+                "u16",
+                12
+              ]
+            }
+          },
           {
             "name": "authority",
             "docs": [
@@ -2087,6 +2174,26 @@ export type RatpoolEscrow = {
       "type": {
         "kind": "struct",
         "fields": [
+          {
+            "name": "economyVersion",
+            "docs": [
+              "These terms are copied at creation and cannot be repriced by updates."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "winnerCount",
+            "type": "u8"
+          },
+          {
+            "name": "winnerWeights",
+            "type": {
+              "array": [
+                "u16",
+                12
+              ]
+            }
+          },
           {
             "name": "id",
             "type": "u64"
@@ -2257,6 +2364,20 @@ export type RatpoolEscrow = {
             "type": {
               "vec": "pubkey"
             }
+          },
+          {
+            "name": "economyVersion",
+            "type": "u8"
+          },
+          {
+            "name": "winnerWeights",
+            "type": {
+              "vec": "u16"
+            }
+          },
+          {
+            "name": "collectedAt",
+            "type": "i64"
           }
         ]
       }
@@ -2297,6 +2418,24 @@ export type RatpoolEscrow = {
           },
           {
             "name": "cancelled"
+          }
+        ]
+      }
+    },
+    {
+      "name": "payoutPolicyUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "winnerCount",
+            "type": "u8"
+          },
+          {
+            "name": "weights",
+            "type": {
+              "vec": "u16"
+            }
           }
         ]
       }
@@ -2509,7 +2648,7 @@ export type RatpoolEscrow = {
     {
       "name": "configSeed",
       "type": "bytes",
-      "value": "[99, 111, 110, 102, 105, 103, 95, 118, 50]"
+      "value": "[99, 111, 110, 102, 105, 103, 95, 118, 54]"
     },
     {
       "name": "guardSeed",
@@ -2522,7 +2661,7 @@ export type RatpoolEscrow = {
     {
       "name": "matchSeed",
       "type": "bytes",
-      "value": "[109, 97, 116, 99, 104, 95, 118, 50]"
+      "value": "[109, 97, 116, 99, 104, 95, 118, 54]"
     },
     {
       "name": "maxFeeBps",

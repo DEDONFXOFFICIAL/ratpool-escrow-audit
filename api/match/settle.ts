@@ -1,10 +1,11 @@
 import { PublicKey } from "@solana/web3.js";
 import { BorshCoder, EventParser, type Idl } from "@anchor-lang/core";
+import IDL_V5 from "../../src/chain/idl/ratpool_escrow.v5.idl.js";
 import IDL_V3 from "../../src/chain/idl/ratpool_escrow.v3.idl.js";
-import { collectedPlayers, enumKey, guardPda, matchPda, ownedByEscrow, referralPda, toBn, TOKEN_PROGRAM_ID, type EscrowProgram } from "../../src/chain/escrow.js";
+import { collectedPlayers, enumKey, guardPda, matchPda, ownedByEscrow, PROGRAM_ID, referralPda, toBn, TOKEN_PROGRAM_ID, type EscrowProgram } from "../../src/chain/escrow.js";
 import { requireFeeFunds, preflight, ata, authority, endpoint, entryUnits, HttpError, mint, parseId, parsePubkey, program } from "../_lib.js";
 import { PRICE_TIERS } from "../../src/state/types.js";
-import { DB_ENABLED, dbUpdate, dbUpsert, usdc } from "../_db.js";
+import { DB_ENABLED, dbUpdate, dbUpsert, dbSelect, dbInsertMissing, dbRpc, usdc } from "../_db.js";
 import { closeFinished, refundAll } from "../_refund.js";
 import { paySigned, type Payout } from "../_settle.js";
 import { skullsForRank } from "../../src/state/skulls.js";
@@ -222,7 +223,7 @@ async function findSettlement(
     Promise.race([q, new Promise<never>((_, no) => setTimeout(() => no(cutShort()), Math.max(1, until - Date.now())))]);
   // This version's receipts first, then v3's (no referred list): a reader of
   // one cannot read the other.
-  const parsers = [new EventParser(p.programId, p.coder), new EventParser(p.programId, new BorshCoder(IDL_V3 as unknown as Idl))];
+  const parsers = [new EventParser(p.programId, p.coder), new EventParser(p.programId, new BorshCoder(IDL_V5 as unknown as Idl)), new EventParser(p.programId, new BorshCoder(IDL_V3 as unknown as Idl))];
   const eventsIn = (logs: string[]) => {
     for (const parser of parsers) {
       try {
@@ -290,6 +291,9 @@ async function findSettlement(
         amounts: nums(d.amounts),
         referred,
         unpaired,
+        economyVersion: Number(d.economy_version ?? d.economyVersion ?? 5),
+        winnerWeights: (d.winner_weights ?? d.winnerWeights) as number[] | undefined,
+        collectedAt: Number(d.collected_at ?? d.collectedAt ?? 0),
       };
     }
     return null;
@@ -325,12 +329,21 @@ async function record(id: bigint, stakers: string[], ranking: string[], pay: Pay
     if (stakers.includes(s) && !order.includes(s)) order.push(s);
   }
   for (const s of stakers) if (!order.includes(s)) order.push(s);
+  // Closed vaults no longer contain the entry; use the original match record.
+  const stored = DB_ENABLED ? await dbSelect<{ entry: number }>(`matches?id=eq.${id}&select=entry`) : [];
+  const previous = DB_ENABLED ? await dbSelect<{ rank: number; skulls: number }>(`results?match_id=eq.${id}&select=rank,skulls&limit=1`) : [];
+  const price = entry === undefined ? Number(stored?.[0]?.entry ?? 0) : usdc(entry);
+  // A partially recorded legacy match keeps the rule under which it started.
+  const version = pay.economyVersion === 6 ? 2 : 1;
+  const old = previous?.[0];
+  const factor = version === 1 && old && skullsForRank(old.rank, 0, 1) > 0
+    ? old.skulls / skullsForRank(old.rank, 0, 1) : undefined;
   const rows = order.map((wallet, i) => ({
     match_id: id.toString(),
     wallet,
     rank: i + 1,
     payout: usdc(paid[wallet] ?? 0),
-    skulls: skullsForRank(i + 1),
+    skulls: factor === undefined ? skullsForRank(i + 1, price, version) : Math.round(skullsForRank(i + 1, 0, 1) * factor),
   }));
   // Awaited, all of them: Vercel suspends a function the moment it has
   // responded, and a write still in flight is a write that never happens.
@@ -340,14 +353,29 @@ async function record(id: bigint, stakers: string[], ranking: string[], pay: Pay
   // a row lost when the match opened (a database blip) used to stay lost,
   // the update matching nothing and every result refused for want of it
   // (review 2026-10-06, DB-05).
-  const settled = { state: "settled", fee: usdc(pay.fee), pool: usdc(pay.pool), stakers: stakers.length, signature: pay.signature, settled_at: new Date().toISOString() };
+  const settled = { economy_version: pay.economyVersion ?? 5, winner_weights: pay.winnerWeights ?? [50,30,20], state: "settled", fee: usdc(pay.fee), pool: usdc(pay.pool), stakers: stakers.length, signature: pay.signature, settled_at: new Date().toISOString() };
   const tier = entry === undefined ? undefined : PRICE_TIERS.find((t) => entryUnits(t) === entry);
   const wrote = [
     tier && entry !== undefined
       ? await dbUpsert("matches", { id: id.toString(), tier: tier.id, entry: usdc(entry), ...settled })
       : await dbUpdate("matches", { id: id.toString() }, settled),
-    await dbUpsert("results", rows),
+    // Refuse an uncertain historical rule during a read outage; settlement is
+    // already paid and the existing retry path will complete the record later.
+    previous !== null && stored !== null && (entry !== undefined || stored.length > 0)
+      ? await dbInsertMissing("results", rows) : !DB_ENABLED,
   ];
+  if (pay.economyVersion === 6 && DB_ENABLED) {
+    const at = pay.collectedAt;
+    const credited = at && Number.isSafeInteger(at) && at > 0 ? await dbRpc<{ ok: boolean }>("credit_paid_referral_points", {
+      p_network: process.env.SOLANA_CLUSTER || process.env.VITE_SOLANA_CLUSTER || "devnet",
+      p_program_id: PROGRAM_ID.toBase58(),
+      p_source_key: `${matchPda(id).toBase58()}:${at}`,
+      p_winners: pay.winners,
+      p_started_at: new Date(at * 1000).toISOString(),
+    }) : null;
+    wrote.push(credited?.ok === true);
+  }
+  // Historical cash referrals remain recorded for their original receipts.
   // What each referrer earned from this match: the referral board's figures.
   if (pay.referred.length) {
     wrote.push(

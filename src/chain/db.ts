@@ -251,6 +251,25 @@ export async function fetchBoard(self: string, selfName: string): Promise<Board 
   return { top, self: selfRow, total, selfOffBoard: !top.some((r) => r.isSelf) };
 }
 
+/** Real signed player accounts only, separated from paid matches and networks. */
+export async function fetchFreePlayBoard(self: string, selfName: string): Promise<Board | null> {
+  const path = `free_play_leaderboard?network=eq.${CLUSTER}`;
+  type FreeRow = { wallet: string; name: string; skulls: number; rank: number };
+  const [rows, mine, total] = await Promise.all([
+    select<FreeRow[]>(`${path}&select=wallet,name,skulls,rank&order=rank.asc&limit=${BOARD_SIZE}`),
+    select<FreeRow[]>(`${path}&wallet=eq.${encodeURIComponent(self)}&select=wallet,name,skulls,rank`),
+    count(`${path}&select=wallet`),
+  ]);
+  if (!rows || !mine || total === null) return null;
+  const row = (r: FreeRow): BoardRow => ({ rank: r.rank, name: r.name, skulls: r.skulls, isSelf: r.wallet === self });
+  const top = rows.map(row);
+  return {
+    top, total: total + (mine[0] ? 0 : 1),
+    self: mine[0] ? row(mine[0]) : { rank: total + 1, name: selfName || "You", skulls: 0, isSelf: true },
+    selfOffBoard: !top.some((r) => r.isSelf),
+  };
+}
+
 /**
  * A settled match's board, as the server wrote it at settle: every staker's
  * rank and payout, with names where the wallets have registered a rat.
@@ -305,6 +324,7 @@ export interface InviteInfo {
   verified: number;
   /** USDC earned from invited friends' podium finishes, all time. */
   earned?: number;
+  points?: number;
   /** Each referral payout, newest first. */
   rewards?: { id: string; amount: number; at: string }[];
   recent:{ name: string; at: string; verified: boolean }[];
@@ -382,49 +402,30 @@ export function savedInviteCode(): string | null {
   }
 }
 
-/** One row of the referral board: a player, what their invites earned them, and friends who joined. */
+/** Network-scoped referral points; cash history remains separate. */
 export interface ReferralRow {
   rank: number;
   name: string;
-  earned: number;
-  joined: number;
+  points: number;
+  paidWins: number;
+  freeWins: number;
   isSelf: boolean;
 }
-
-/** How many the referral board shows. */
 export const REFERRAL_BOARD_SIZE = 50;
-
-/**
- * The referral board (supabase view referral_board): the top fifty by what
- * their invites earned them (owner, 2026-09-30), friends who joined breaking
- * ties, and the viewer's own place if they are not in it.
- * Null when the database cannot be reached.
- */
-export async function fetchReferralBoard(
-  self: string,
-  selfName: string,
-): Promise<{ top: ReferralRow[]; self: ReferralRow | null; selfOffBoard: boolean } | null> {
-  const rows = await select<{ wallet: string; name: string; earned: number; joined: number }[]>(
-    `referral_board?select=wallet,name,earned,joined&joined=gt.0&order=earned.desc,joined.desc,name.asc&limit=${REFERRAL_BOARD_SIZE}`,
-  );
+export async function fetchReferralBoard(self: string, selfName: string): Promise<{
+  top: ReferralRow[]; self: ReferralRow | null; selfOffBoard: boolean;
+} | null> {
+  type R = { wallet: string; name: string; points: number; paid_wins: number; free_wins: number; rank: number };
+  const base = `referral_points_leaderboard?network=eq.${encodeURIComponent(CLUSTER)}&select=wallet,name,points,paid_wins,free_wins,rank`;
+  const rows = await select<R[]>(`${base}&order=rank.asc&limit=${REFERRAL_BOARD_SIZE}`);
   if (!rows) return null;
-  const top = rows.map((r, i) => ({
-    rank: i + 1,
+  const toRow = (r: R): ReferralRow => ({ rank: Number(r.rank),
     name: r.name === r.wallet ? shortWallet(r.wallet) : r.name,
-    earned: Number(r.earned) || 0,
-    joined: r.joined,
-    isSelf: r.wallet === self,
-  }));
-  const onBoard = top.find((r) => r.isSelf) ?? null;
+    points: Number(r.points), paidWins: r.paid_wins, freeWins: r.free_wins, isSelf: r.wallet === self });
+  const top = rows.map(toRow);
+  const onBoard = top.find((r) => r.isSelf);
   if (onBoard) return { top, self: onBoard, selfOffBoard: false };
-  const mine = await select<{ earned: number; joined: number }[]>(`referral_board?wallet=eq.${encodeURIComponent(self)}&select=earned,joined`);
-  const me = mine?.[0];
-  if (!mine || !me || me.joined === 0) return { top, self: null, selfOffBoard: false };
-  const above = await count(`referral_board?select=wallet&earned=gt.${Number(me.earned) || 0}`);
-  if (above === null) return { top, self: null, selfOffBoard: false };
-  return {
-    top,
-    self: { rank: above + 1, name: selfName || "You", earned: Number(me.earned) || 0, joined: me.joined, isSelf: true },
-    selfOffBoard: true,
-  };
+  const mine = await select<R[]>(`${base}&wallet=eq.${encodeURIComponent(self)}&limit=1`);
+  if (!mine) return null;
+  return { top, self: mine[0] ? { ...toRow(mine[0]), name: selfName || "You" } : null, selfOffBoard: !!mine[0] };
 }

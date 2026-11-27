@@ -69,6 +69,9 @@ export const POST = endpoint(async (body) => {
     pool: Number(m.pool),
     // When the match started on chain: the room signs it into the ranking.
     collectedAt: Number(m.collectedAt),
+    winnerCount: m.winnerCount,
+    winnerWeights: m.winnerWeights.slice(0, m.winnerCount),
+    economyVersion: m.economyVersion,
     players: m.players.map((pl) => ({ wallet: pl.key.toBase58(), status: enumKey<PlayerStatus>(pl.status) })),
     ...(approvedHere !== undefined ? { approvedHere } : {}),
   };

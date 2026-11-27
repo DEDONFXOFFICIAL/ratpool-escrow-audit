@@ -46,6 +46,8 @@ pub fn handle_initialize(
     );
 
     let c = &mut ctx.accounts.config;
+    c.winner_count = PODIUM_SHARES.len() as u8;
+    c.winner_weights = default_payout_weights();
     c.authority = ctx.accounts.authority.key();
     c.pending_authority = None;
     c.admission = admission;

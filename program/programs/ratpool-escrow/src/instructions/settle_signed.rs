@@ -6,7 +6,7 @@ use crate::{
     constants::*,
     error::EscrowError,
     events::MatchSettled,
-    state::{Config, Guard, Match, MatchState, PlayerStatus, Referral},
+    state::{Config, Guard, Match, MatchState, PlayerStatus},
 };
 
 #[derive(Accounts)]
@@ -54,13 +54,13 @@ pub struct SettleSigned<'info> {
 /// holding too few is refused, never topped up from wallets the room did not
 /// rank. The payout key chooses nothing.
 ///
-/// Remaining accounts: each place's winner's usual token account; then each
-/// winner's invite record address, in podium order, whether or not the record
-/// exists; then, for each record that exists, its referrer's usual token
-/// account. Only usual accounts, the ones the app shows (escrow v4): any
-/// account a winner owned used to do. Every record is counted and paid: none
-/// can be left out, invented or redirected. The receipt names, for each
-/// referrer, the winner whose invite it was.
+/// Remaining accounts contain exactly the winners' usual token accounts,
+/// in payout order. Referral records and destinations are not accepted.
+/// The full commission goes to the fee destination pinned in the match.
+/// Referral points are recorded by the backend from confirmed receipts.
+/// The receipt includes economy version, pinned weights and collection
+/// time so record retries after account closure preserve the original
+/// economic terms and cannot duplicate referral point awards.
 pub fn handle_settle_signed<'info>(ctx: Context<'info, SettleSigned<'info>>, id: u64) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     require!(
@@ -88,7 +88,8 @@ pub fn handle_settle_signed<'info>(ctx: Context<'info, SettleSigned<'info>>, id:
     // The podium, chosen here.
     let winners: Vec<Pubkey> = {
         let m = &ctx.accounts.match_account;
-        let n = m.collected_count().min(PODIUM_SHARES.len());
+        require!(m.economy_version == ECONOMY_VERSION && m.winner_count > 0 && m.winner_count as usize <= MAX_WINNERS, EscrowError::BadPayoutPolicy);
+        let n = m.collected_count().min(m.winner_count as usize);
         require!(n >= 1, EscrowError::BadPodium);
         let mut w: Vec<Pubkey> = Vec::with_capacity(n);
         for k in ranking.iter() {
@@ -107,7 +108,7 @@ pub fn handle_settle_signed<'info>(ctx: Context<'info, SettleSigned<'info>>, id:
     let n = winners.len();
 
     let rem = ctx.remaining_accounts;
-    require!(rem.len() >= 2 * n, EscrowError::BadReferral);
+    require!(rem.len() == n, EscrowError::BadPodium);
     // Each place's account first: the winner's usual account of this mint.
     let mint_key = ctx.accounts.mint.key();
     for i in 0..n {
@@ -116,51 +117,24 @@ pub fn handle_settle_signed<'info>(ctx: Context<'info, SettleSigned<'info>>, id:
         require!(ta.mint == mint_key, EscrowError::WrongMint);
     }
 
-    // Every winner's invite record, at its own address: the program sees
-    // which exist, so none can be left out to shift the shares.
-    let mut referrers: Vec<Pubkey> = Vec::with_capacity(n);
-    let mut referred: Vec<Pubkey> = Vec::with_capacity(n);
-    for (i, w) in winners.iter().enumerate() {
-        let rec = &rem[n + i];
-        let (address, _) = Pubkey::find_program_address(&[REFERRAL_SEED, w.as_ref()], ctx.program_id);
-        require!(rec.key() == address, EscrowError::BadReferral);
-        if rec.owner == ctx.program_id && !rec.data_is_empty() {
-            referrers.push(Account::<Referral>::try_from(rec)?.referrer);
-            referred.push(*w);
-        }
-    }
-    let k = referrers.len();
-    require!(rem.len() == 2 * n + k, EscrowError::BadReferral);
-
     let pool = ctx.accounts.match_account.pool;
     let fee = pool
         .checked_mul(ctx.accounts.match_account.fee_bps as u64)
         .ok_or(EscrowError::Overflow)?
         / BPS;
     let net = pool.checked_sub(fee).ok_or(EscrowError::Overflow)?;
-    // Referrals come entirely from the fee, never more than it (every record
-    // must be paid, so a fee smaller than the share is shared out rather
-    // than leave the match unpayable); rounding dust stays with the platform.
-    let referral_total = if referrers.is_empty() {
-        0
-    } else {
-        (pool.checked_mul(REFERRAL_BPS).ok_or(EscrowError::Overflow)? / BPS).min(fee)
-    };
-    let referral_each = referral_total.checked_div(referrers.len() as u64).unwrap_or(0);
-    let referral_amounts = vec![referral_each; referrers.len()];
-    let referral_paid = referral_each
-        .checked_mul(referrers.len() as u64)
-        .ok_or(EscrowError::Overflow)?;
-    let platform_fee = fee.checked_sub(referral_paid).ok_or(EscrowError::Overflow)?;
+    let platform_fee = fee;
 
     // The shares that exist, scaled to the whole net pool. Any rounding
     // remainder goes to first place.
-    let total: u64 = PODIUM_SHARES[..n].iter().sum();
+    let weights = ctx.accounts.match_account.winner_weights;
+    let total: u64 = weights[..n].iter().map(|w| *w as u64).sum();
+    require!(total > 0 && weights[..n].iter().all(|w| *w > 0), EscrowError::BadPayoutPolicy);
     let mut amounts = vec![0u64; n];
     let mut below_first = 0u64;
     for i in 1..n {
         amounts[i] = net
-            .checked_mul(PODIUM_SHARES[i])
+            .checked_mul(weights[i] as u64)
             .ok_or(EscrowError::Overflow)?
             / total;
         below_first = below_first.checked_add(amounts[i]).ok_or(EscrowError::Overflow)?;
@@ -202,14 +176,6 @@ pub fn handle_settle_signed<'info>(ctx: Context<'info, SettleSigned<'info>>, id:
         let acc = &rem[i];
         pay(acc, amounts[i])?;
     }
-    for j in 0..k {
-        let acc = &rem[2 * n + j];
-        require!(acc.key() == usual_account(&referrers[j], &mint_key), EscrowError::NotUsualAccount);
-        let ta = Account::<TokenAccount>::try_from(acc)?;
-        require!(ta.mint == mint_key, EscrowError::WrongMint);
-        pay(acc, referral_each)?;
-    }
-
     let m = &mut ctx.accounts.match_account;
     for w in winners.iter() {
         if let Some(p) = m.players.iter_mut().find(|p| p.key == *w) {
@@ -224,10 +190,13 @@ pub fn handle_settle_signed<'info>(ctx: Context<'info, SettleSigned<'info>>, id:
         fee,
         winners,
         amounts,
-        referrers,
-        referral_amounts,
+        referrers: vec![],
+        referral_amounts: vec![],
         platform_fee,
-        referred
+        referred: vec![],
+        economy_version: m.economy_version,
+        winner_weights: m.winner_weights[..m.winner_count as usize].to_vec(),
+        collected_at: m.collected_at,
     });
     Ok(())
 }

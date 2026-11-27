@@ -1,5 +1,7 @@
 import { SystemProgram } from "@solana/web3.js";
-import { toBn, TOKEN_PROGRAM_ID } from "../../src/chain/escrow.js";
+import { configPda, matchPda, toBn, TOKEN_PROGRAM_ID } from "../../src/chain/escrow.js";
+import { SUPPORTED_WINNERS } from "../_settle.js";
+import { requirePaidPoolsOpen } from "../_maintenance.js";
 import { MATCH_RENT_LAMPORTS, requireFeeFunds, preflight, ata, connection, authority, endpoint, entryUnits, HttpError, mint, newMatchId, parsePubkey, program, tierById } from "../_lib.js";
 import { DB_ENABLED, dbUpsert, usdc, withinLimit, withinSharedLimit } from "../_db.js";
 
@@ -15,6 +17,12 @@ import { DB_ENABLED, dbUpsert, usdc, withinLimit, withinSharedLimit } from "../_
 export const maxDuration = 60;
 
 export const POST = endpoint(async (body) => {
+  requirePaidPoolsOpen();
+  const p = program();
+  const config = await p.account.config.fetch(configPda());
+  if (config.winnerCount < 1 || config.winnerCount > SUPPORTED_WINNERS) {
+    throw new HttpError(503, "This payout policy needs an updated settlement service.");
+  }
   const tier = tierById(body.tier);
   if (!tier) throw new HttpError(400, "unknown tier");
   // When the balance was read, not when its answer came: a slow answer must
@@ -72,11 +80,15 @@ export const POST = endpoint(async (body) => {
     .rpc();
   // A few tries before giving up on the record; the match is open on chain
   // either way, and settlement writes the row whole if this one never landed.
-  const row = { id: id.toString(), tier: tier.id, entry: usdc(entry), state: "open" };
+  const opened = await p.account.match.fetch(matchPda(id));
+  const winnerWeights = opened.winnerWeights.slice(0, opened.winnerCount);
+  const row = { id: id.toString(), tier: tier.id, entry: usdc(entry), state: "open",
+    economy_version: opened.economyVersion, winner_weights: winnerWeights };
   for (let i = 0; DB_ENABLED && i < 3 && !(await dbUpsert("matches", row)); i++) {
     await new Promise((r) => setTimeout(r, 500 * (i + 1)));
   }
-  return { id: id.toString(), entry: Number(entry) };
+  return { id: id.toString(), entry: Number(entry), winnerCount: opened.winnerCount,
+    winnerWeights, minPlayers: opened.minPlayers, economyVersion: opened.economyVersion };
 }, { signed: true });
 
 /** The Android app asks before it posts; see preflight in _lib. */

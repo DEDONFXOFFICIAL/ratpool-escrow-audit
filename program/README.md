@@ -20,10 +20,10 @@ join           seated player signs the displayed entry amount; nothing moves whi
 leave          player leaves; revoke only this match's approval while filling
 evict          authority removes a Joined seat while the room is filling
 collect        room locks: approved stakes enter the vault owned by the match
-start          starts the match with at least 6 staked players and at most 40
-settle         one settlement pays the top 3 what is left after the match's
-               pinned fee (90% at the deployed 10%), split 50/30/20, and the
-               fee to the platform, including any invite rewards taken from it
+start          starts the match with at least 25 staked players; game cap 40, contract cap 50
+settle         one settlement pays the top 7 what is left after the match's
+               pinned fee (90% at the deployed 10%), weights 10/9/8/6/5/4/3, and the
+               entire fee to the platform; no cash referral transfer
 claim_refund   settlement refused after 30 minutes from collection; return every
                unpaid stake in full, with no fee deducted
 cancel         an unpaid cancelled match's collected stakes become refundable
@@ -31,7 +31,7 @@ close_match    reclaim rent once the vault is empty
 propose_authority / accept_authority   rotate control with both keys' signatures
 ```
 
-While fewer than six players are staked, the lobby minute restarts and nothing
+While fewer than twenty-five players are staked, the lobby minute restarts and nothing
 is taken. The platform sponsors every transaction; players never pay network
 fees or need SOL. Sign-in is Google only; an embedded wallet is created for
 the player. The app checks every transaction before that wallet signs it. On-chain
@@ -39,12 +39,12 @@ admission is signed by the platform only for players actually seated in the
 room.
 
 The room server reports the podium, and the escrow trusts that report. The
-podium must contain collected stakers. If at least one podium finisher joined
-through an invite, a total of 1% of the pool is paid to the inviters, out of the
-platform's fee, split equally among the inviters of the invited podium
-finishers. The podium's share (90% at the deployed 10%) is unchanged. Referral recipients may be
-non-stakers. The fee, fee destination, minimum players and refund delay are
-fixed at match creation. The 30-minute settlement window begins at collection;
+podium must contain collected stakers. Each match pins its winner count,
+payout weights, fee, fee destination, minimum players and refund delay at
+creation. The default seven winners receive 20/18/16/12/10/8/6% of the gross
+pot at a 10% fee. Referral awards are database leaderboard points (20 paid,
+5 Free Play per direct invited top-seven finisher), never USDC.
+The 30-minute settlement window begins at collection;
 after it expires, settlement is refused and every stake is returned in full,
 without a fee deduction. The platform pays the refund network fees.
 
@@ -53,33 +53,8 @@ it before or at mainnet. The key that pays out cannot change the program. The
 mint's issuance/freeze authorities remain a separate trust boundary. RatPool is
 live on Solana devnet with test USDC; mainnet follows an independent audit.
 
-The v2 account seeds and cutover requirements are in [MIGRATION-v2.md](MIGRATION-v2.md).
-The current devnet interface requires `join(id, expected_entry)`; the API and
-client must match [UPGRADE-v5.md](UPGRADE-v5.md). Existing account layouts are
-unchanged. The reviewed v5 binary passed all 78 contract tests and was verified
-against the deployed devnet program on 24 November 2026.
-
-## Building
-
-Inside WSL2 with the toolchain from ESCROW.md §6:
-
-```
-./build.sh          # anchor build --arch v0, target dir on the Linux side
-./test.sh           # LiteSVM scenarios against the last program build
-```
-
-`--arch v0` is not optional — see the comment in `build.sh`.
-
-## Layout
-
-```
-programs/ratpool-escrow/src/
-  lib.rs            the #[program] entry, one thin fn per instruction
-  instructions/     one file per instruction: accounts + handler
-  state.rs          Config, Match, Player and their enums
-  events.rs         one event per state change, for explorers and the server
-  error.rs          every refusal, named
-  constants.rs      seeds, MAX_PLAYERS, the podium split, the fee ceiling
-programs/ratpool-escrow/tests/
-  escrow.rs         the suite; SPL accounts written by hand into LiteSVM
-```
+The current v6 interface uses `config_v6` and `match_v6` seeds and the
+`ratpool-settle-v6` signed domain. The guard and referral addresses stay the
+same. See [UPGRADE-v6.md](UPGRADE-v6.md) for the coordinated cutover;
+v5 deployment records are historical. Source changes alone do not establish
+which binary is deployed. `join(id, expected_entry)` remains required.

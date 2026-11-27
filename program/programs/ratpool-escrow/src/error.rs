@@ -26,7 +26,7 @@ pub enum EscrowError {
     TooFewPlayers,
     #[msg("Match has not been collected")]
     MatchNotCollected,
-    #[msg("Podium must contain min(3, collected_count) distinct stakers with matching token accounts")]
+    #[msg("Podium must contain min(pinned winner_count, collected_count) distinct stakers with matching token accounts")]
     BadPodium,
     #[msg("Not a staker in this match")]
     NotAStaker,
@@ -62,7 +62,7 @@ pub enum EscrowError {
     MissingRoomSignature,
     #[msg("The signature check is not the room server's, or not for this ranking")]
     BadRoomSignature,
-    #[msg("The ranking must hold one to six distinct wallets")]
+    #[msg("The ranking must hold one to twelve distinct wallets")]
     BadRanking,
     #[msg("A referral must be a winner's own record, paid to its referrer")]
     BadReferral,
@@ -72,4 +72,6 @@ pub enum EscrowError {
     NotUsualAccount,
     #[msg("The pool entry changed; approve the displayed amount again")]
     EntryChanged,
+    #[msg("Invalid payout policy")]
+    BadPayoutPolicy,
 }

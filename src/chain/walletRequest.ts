@@ -20,7 +20,11 @@
  * Shared by the app and api/_lib.ts (requireWalletProof), so both build the
  * detail the same way from the same request.
  */
-export type WalletAction = "send" | "buy" | "faucet" | "leave";
+export type WalletAction = "send" | "buy" | "faucet" | "leave" | "freeplay-start" | "freeplay-finish";
+
+export const freePlayStartDetail = (session: string, version = 1) => version === 1 ? session : `${session} v${version}`;
+export const freePlayDetail = (session: string, rank: number, elapsedMs: number, version = 1) =>
+  `${session} ${rank} ${elapsedMs}${version === 1 ? "" : ` v${version}`}`;
 
 export interface WalletProof {
   message: string;

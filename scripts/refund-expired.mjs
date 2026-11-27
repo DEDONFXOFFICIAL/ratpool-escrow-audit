@@ -18,6 +18,9 @@
 // clock. Nothing is sent to RatPool.
 
 import fs from "node:fs";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import anchor from "@anchor-lang/core";
 import {
   Connection,
   Keypair,
@@ -44,43 +47,21 @@ const payerPath = arg("--payer");
 const payer = payerPath ? Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(payerPath, "utf8")))) : null;
 
 const pda = (...seeds) => PublicKey.findProgramAddressSync(seeds, PROGRAM)[0];
-const CONFIG = pda(Buffer.from("config_v2"));
+const CONFIG = pda(Buffer.from("config_v6"));
 const MATCH_DISC = Buffer.from(idl.accounts.find((a) => a.name === "Match").discriminator);
 const CLAIM_DISC = Buffer.from(idl.instructions.find((i) => i.name === "claim_refund").discriminator);
-const STATE = ["Open", "Collected", "Settled", "Cancelled"];
-const STATUS = ["Joined", "Collected", "Dropped", "Paid", "Refunded"];
+const coder = new anchor.BorshCoder(idl);
 
-/** The Match account (program/programs/ratpool-escrow/src/state.rs), read field by field. */
-function readMatch(data) {
-  let o = 8;
-  const u64 = () => ((o += 8), data.readBigUInt64LE(o - 8));
-  const i64 = () => ((o += 8), data.readBigInt64LE(o - 8));
-  const u8 = () => data[o++];
-  const key = () => ((o += 32), new PublicKey(data.subarray(o - 32, o)));
-  const id = u64();
-  const entry = u64();
-  o += 2; // fee_bps
-  key(); // fee_wallet
-  u8(); // min_players
-  i64(); // refund_delay
-  const refundAfter = i64();
-  const state = STATE[u8()];
-  i64(); // collected_at
-  const pool = u64();
-  u8(); // bump
-  const n = data.readUInt32LE(o);
-  o += 4;
-  const players = [];
-  for (let i = 0; i < n; i++) players.push({ key: key(), tokenAccount: key(), status: STATUS[u8()] });
-  return { id, entry, refundAfter, state, pool, players };
+/** Decode the actual generated v6 IDL, including pinned policy fields. */
+export function readMatch(data) {
+  const m = coder.accounts.decode("Match", data);
+  if (m.economy_version !== 6) throw new Error("Unknown escrow layout; use its matching refund tool.");
+  return { id: BigInt(m.id.toString()), entry: BigInt(m.entry.toString()),
+    refundAfter: BigInt(m.refund_after.toString()), state: Object.keys(m.state)[0],
+    pool: BigInt(m.pool.toString()), players: m.players.map((p) => ({ key: p.key,
+      tokenAccount: p.token_account, status: Object.keys(p.status)[0] })) };
 }
-
-/** The config's mint: after the authority and the optional pending one, the admission and the fee wallet. */
-function configMint(data) {
-  let o = 8 + 32;
-  o += data[o] === 1 ? 33 : 1;
-  return new PublicKey(data.subarray(o + 64, o + 96));
-}
+export function configMint(data) { return coder.accounts.decode("Config", data).mint; }
 
 const usdc = (units) => (Number(units) / 1e6).toFixed(2);
 
@@ -151,4 +132,4 @@ console.log(`${done} of ${owed.length} returned.`);
 return done === owed.length ? 0 : 1;
 }
 
-process.exitCode = await main();
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) process.exitCode = await main();

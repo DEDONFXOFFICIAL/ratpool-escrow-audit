@@ -1,10 +1,12 @@
 use anchor_lang::prelude::*;
 
-use crate::constants::MAX_PLAYERS;
+use crate::constants::{MAX_PLAYERS, MAX_WINNERS};
 
 #[account]
 #[derive(InitSpace)]
 pub struct Config {
+    pub winner_count: u8,
+    pub winner_weights: [u16; MAX_WINNERS],
     /// Signs match management; rotation requires the next key to accept.
     pub authority: Pubkey,
     pub pending_authority: Option<Pubkey>,
@@ -23,6 +25,10 @@ pub struct Config {
 #[account]
 #[derive(InitSpace)]
 pub struct Match {
+    /// These terms are copied at creation and cannot be repriced by updates.
+    pub economy_version: u8,
+    pub winner_count: u8,
+    pub winner_weights: [u16; MAX_WINNERS],
     pub id: u64,
     /// Entry fee in the mint's base units.
     pub entry: u64,

@@ -42,7 +42,7 @@ const IDL = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -83,7 +83,7 @@ const IDL = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -104,7 +104,7 @@ const IDL = {
                   104,
                   95,
                   118,
-                  50
+                  54
                 ]
               },
               {
@@ -157,7 +157,7 @@ const IDL = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -178,7 +178,7 @@ const IDL = {
                   104,
                   95,
                   118,
-                  50
+                  54
                 ]
               },
               {
@@ -264,7 +264,7 @@ const IDL = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -285,7 +285,7 @@ const IDL = {
                   104,
                   95,
                   118,
-                  50
+                  54
                 ]
               },
               {
@@ -375,7 +375,7 @@ const IDL = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -396,7 +396,7 @@ const IDL = {
                   104,
                   95,
                   118,
-                  50
+                  54
                 ]
               },
               {
@@ -485,7 +485,7 @@ const IDL = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -506,7 +506,7 @@ const IDL = {
                   104,
                   95,
                   118,
-                  50
+                  54
                 ]
               },
               {
@@ -605,7 +605,7 @@ const IDL = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -626,7 +626,7 @@ const IDL = {
                   104,
                   95,
                   118,
-                  50
+                  54
                 ]
               },
               {
@@ -684,7 +684,7 @@ const IDL = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -763,7 +763,7 @@ const IDL = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -784,7 +784,7 @@ const IDL = {
                   104,
                   95,
                   118,
-                  50
+                  54
                 ]
               },
               {
@@ -850,7 +850,7 @@ const IDL = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -871,7 +871,7 @@ const IDL = {
                   104,
                   95,
                   118,
-                  50
+                  54
                 ]
               },
               {
@@ -930,7 +930,7 @@ const IDL = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -1091,7 +1091,7 @@ const IDL = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -1196,7 +1196,7 @@ const IDL = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -1234,7 +1234,7 @@ const IDL = {
                   104,
                   95,
                   118,
-                  50
+                  54
                 ]
               },
               {
@@ -1334,7 +1334,7 @@ const IDL = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -1355,7 +1355,7 @@ const IDL = {
                   104,
                   95,
                   118,
-                  50
+                  54
                 ]
               },
               {
@@ -1409,7 +1409,7 @@ const IDL = {
                   103,
                   95,
                   118,
-                  50
+                  54
                 ]
               }
             ]
@@ -1456,6 +1456,62 @@ const IDL = {
           "name": "admission",
           "type": {
             "option": "pubkey"
+          }
+        }
+      ]
+    },
+    {
+      "name": "update_payout_policy",
+      "discriminator": [
+        103,
+        99,
+        212,
+        255,
+        252,
+        66,
+        39,
+        23
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103,
+                  95,
+                  118,
+                  54
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "program",
+          "address": "Ctu4Q9hJKUksKZ9mXrydtua2LcuvmM8Wt34Xc6VK1wmj"
+        },
+        {
+          "name": "program_data"
+        }
+      ],
+      "args": [
+        {
+          "name": "weights",
+          "type": {
+            "vec": "u16"
           }
         }
       ]
@@ -1634,6 +1690,19 @@ const IDL = {
       ]
     },
     {
+      "name": "PayoutPolicyUpdated",
+      "discriminator": [
+        217,
+        238,
+        184,
+        155,
+        102,
+        198,
+        121,
+        197
+      ]
+    },
+    {
       "name": "PlayerEvicted",
       "discriminator": [
         55,
@@ -1789,7 +1858,7 @@ const IDL = {
     {
       "code": 6012,
       "name": "BadPodium",
-      "msg": "Podium must contain min(3, collected_count) distinct stakers with matching token accounts"
+      "msg": "Podium must contain min(pinned winner_count, collected_count) distinct stakers with matching token accounts"
     },
     {
       "code": 6013,
@@ -1879,7 +1948,7 @@ const IDL = {
     {
       "code": 6030,
       "name": "BadRanking",
-      "msg": "The ranking must hold one to six distinct wallets"
+      "msg": "The ranking must hold one to twelve distinct wallets"
     },
     {
       "code": 6031,
@@ -1900,6 +1969,11 @@ const IDL = {
       "code": 6034,
       "name": "EntryChanged",
       "msg": "The pool entry changed; approve the displayed amount again"
+    },
+    {
+      "code": 6035,
+      "name": "BadPayoutPolicy",
+      "msg": "Invalid payout policy"
     }
   ],
   "types": [
@@ -1940,6 +2014,19 @@ const IDL = {
       "type": {
         "kind": "struct",
         "fields": [
+          {
+            "name": "winner_count",
+            "type": "u8"
+          },
+          {
+            "name": "winner_weights",
+            "type": {
+              "array": [
+                "u16",
+                12
+              ]
+            }
+          },
           {
             "name": "authority",
             "docs": [
@@ -2087,6 +2174,26 @@ const IDL = {
       "type": {
         "kind": "struct",
         "fields": [
+          {
+            "name": "economy_version",
+            "docs": [
+              "These terms are copied at creation and cannot be repriced by updates."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "winner_count",
+            "type": "u8"
+          },
+          {
+            "name": "winner_weights",
+            "type": {
+              "array": [
+                "u16",
+                12
+              ]
+            }
+          },
           {
             "name": "id",
             "type": "u64"
@@ -2257,6 +2364,20 @@ const IDL = {
             "type": {
               "vec": "pubkey"
             }
+          },
+          {
+            "name": "economy_version",
+            "type": "u8"
+          },
+          {
+            "name": "winner_weights",
+            "type": {
+              "vec": "u16"
+            }
+          },
+          {
+            "name": "collected_at",
+            "type": "i64"
           }
         ]
       }
@@ -2297,6 +2418,24 @@ const IDL = {
           },
           {
             "name": "Cancelled"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PayoutPolicyUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "winner_count",
+            "type": "u8"
+          },
+          {
+            "name": "weights",
+            "type": {
+              "vec": "u16"
+            }
           }
         ]
       }
@@ -2509,7 +2648,7 @@ const IDL = {
     {
       "name": "CONFIG_SEED",
       "type": "bytes",
-      "value": "[99, 111, 110, 102, 105, 103, 95, 118, 50]"
+      "value": "[99, 111, 110, 102, 105, 103, 95, 118, 54]"
     },
     {
       "name": "GUARD_SEED",
@@ -2522,7 +2661,7 @@ const IDL = {
     {
       "name": "MATCH_SEED",
       "type": "bytes",
-      "value": "[109, 97, 116, 99, 104, 95, 118, 50]"
+      "value": "[109, 97, 116, 99, 104, 95, 118, 54]"
     },
     {
       "name": "MAX_FEE_BPS",

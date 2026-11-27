@@ -173,6 +173,11 @@ export function dbUpsert(table: string, rows: object | object[]): Promise<boolea
   return call("POST", table, rows, "resolution=merge-duplicates,return=minimal");
 }
 
+/** Immutable awards: retries fill missing results without rewriting past scores. */
+export function dbInsertMissing(table: string, rows: object[]): Promise<boolean> {
+  return call("POST", table, rows, "resolution=ignore-duplicates,return=minimal");
+}
+
 /** Patch the rows matching `where` (column → value, exact match). */
 export function dbUpdate(table: string, where: Record<string, string>, patch: object): Promise<boolean> {
   const q = Object.entries(where)

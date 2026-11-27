@@ -1,3 +1,4 @@
+import { requirePaidPoolsOpen } from "../_maintenance.js";
 import { ComputeBudgetProgram } from "@solana/web3.js";
 import { unpackAccount } from "@solana/spl-token";
 import { collectedPlayers, enumKey, matchPda, toBn, TOKEN_PROGRAM_ID, type PlayerStatus } from "../../src/chain/escrow.js";
@@ -29,6 +30,7 @@ const BATCH = 10; // the size-built program (program/Cargo.toml) spends a little
 export const maxDuration = 60;
 
 export const POST = endpoint(async (body) => {
+  requirePaidPoolsOpen();
   const id = parseId(body.id);
   const p = program();
   const auth = authority().publicKey;
